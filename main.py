@@ -24,8 +24,8 @@ def get_args():
 
 def learn_episodic_DDPG(args):
     ###
-    # args.env = "CartPole-v0"
-    # args.discrete_action = True
+    args.env = "CartPole-v0"
+    args.discrete_action = True
 
     env = gym.make(args.env)
     ob_sp = env.observation_space.shape[0]
@@ -47,7 +47,7 @@ def learn_episodic_DDPG(args):
         epr = 0
         for t in range(args.T):
             action = agent.get_action(observation)
-            next_obs, reward, done, _ = env.step([action])
+            next_obs, reward, done, _ = env.step([action] if args.env == "Pendulum-v0" else action)
             agent.store_transition(observation, action, reward, next_obs, done)
             agent.train()
             epr += reward
@@ -55,7 +55,6 @@ def learn_episodic_DDPG(args):
             
             if args.render:
                 env.render()
-
             if done:
                 break
         if args.use_writer:
