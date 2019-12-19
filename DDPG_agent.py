@@ -17,8 +17,6 @@ E_GREEDY_STEPS = 30000
 INITIAL_STD = 2.0
 FINAL_STD = 0.1
 BATCH_SIZE = 64
-GRAD_CLIP = 3000 # change this, to ensure gradient clipping
-
 
 class DDPG_Agent:
     
@@ -94,14 +92,14 @@ class DDPG_Agent:
         loss_critic = self.MSE_loss(inputs_critic, targets_critics)
         self.q_optimizer.zero_grad()
         loss_critic.backward()
-        # nn.utils.clip_grad_norm_(self.qnet.parameters(), GRAD_CLIP)
+        # nn.utils.clip_grad_norm_(self.qnet.parameters(), 5)
         self.q_optimizer.step()
-
-        # ACTOR objective: derivative of Q(s, π(s | ø)) with respect to ø
+        
+        # ACTOR gradient ascent of Q(s, π(s | ø)) with respect to ø
         actor_loss = - self.qnet(states, self.policy(states)).mean()
         self.p_optimizer.zero_grad()
         actor_loss.backward()
-        # nn.utils.clip_grad_norm_(self.policy.parameters(), GRAD_CLIP)
+        # nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
         self.p_optimizer.step()
         soft_update(self.policy_targ, self.policy, TAU)
         soft_update(self.qnet_targ, self.qnet, TAU)
