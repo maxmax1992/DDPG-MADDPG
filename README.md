@@ -1,2 +1,2 @@
-# DDPG
-DDPG and MADDPG implementation
+# DDPG / MADDPG
+implementation in pytorch
