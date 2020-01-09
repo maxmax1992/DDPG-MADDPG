@@ -70,8 +70,16 @@ class DDPG_Agent:
         self.n_steps += 1
         return action_with_noise
 
-    def store_transition(self, state, action, reward, next_state, done):
+    def log_transition(self, state, action, reward, next_state, done):
+        print("State", state)
+        print("action", action)
+        print("reward", reward)
+        print("next state", next_state)
+        print("done", done)
 
+
+    def store_transition(self, state, action, reward, next_state, done):
+        log_transition(state, action, reward, next_state, done)
         self.memory.push(torch.from_numpy(state), torch.tensor(action),
                          torch.tensor(reward), torch.from_numpy(next_state),
                          torch.tensor(done))

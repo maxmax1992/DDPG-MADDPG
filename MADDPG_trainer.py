@@ -18,6 +18,12 @@ INITIAL_STD = 2.0
 FINAL_STD = 0.1
 BATCH_SIZE = 64
 
+def log_transition(self, state, action, reward, next_state, done):
+        print("State", state)
+        print("action", action)
+        print("reward", reward)
+        print("next state", next_state)
+        print("done", done)
 
 class DDPG_agent:
 
@@ -53,7 +59,6 @@ class DDPG_agent:
         Rewards for this agent. 1xN array
         States, array of states
         """
-        
         # states =
         print(1)
         pass
