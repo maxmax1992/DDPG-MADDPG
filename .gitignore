@@ -10,3 +10,4 @@ prototypes/__pycache__/utils.cpython-37.pyc
 *.tar
 maddpg
 maddpg-pytorch
+baselines

@@ -35,7 +35,7 @@ def onehot_from_logits(logits, eps=0.0):
 # modified for PyTorch from https://github.com/ericjang/gumbel-softmax/blob/master/Categorical%20VAE.ipynb
 def sample_gumbel(shape, eps=1e-20, tens_type=torch.FloatTensor, device='cpu'):
     """Sample from Gumbel(0, 1)"""
-    U = torch.tensor(tens_type(*shape).uniform_().to(device), requires_grad=False)
+    U = tens_type(shape).uniform_().requires_grad_(True).to(device)
     return -torch.log(-torch.log(U + eps) + eps)
 
 
@@ -121,7 +121,7 @@ Transition = namedtuple('Transition', ['state', 'action', 'reward', 'next_state'
 
 
 class ReplayBuffer(object):
-    def __init__(self, size):
+    def __init__(self, size, nagents):
         """
         Implements a ring buffer (FIFO).
         :param size: (int)  Max number of transitions to store in the buffer. When the buffer overflows the old
@@ -130,6 +130,7 @@ class ReplayBuffer(object):
         self._storage = []
         self._maxsize = size
         self._next_idx = 0
+        self.n_agents = nagents
 
     def __len__(self):
         return len(self._storage)
@@ -178,19 +179,25 @@ class ReplayBuffer(object):
         self._next_idx = (self._next_idx + 1) % self._maxsize
 
     def _encode_sample(self, idxes):
-        obses_t, actions, rewards, obses_tp1, dones = [], [], [], [], []
+        obses_t, actions, rewards, obses_tp1, dones = [ [] for _ in range(self.n_agents) ], \
+            [], [], [ [] for _ in range(self.n_agents) ], \
+            []
+
         for i in idxes:
             data = self._storage[i]
             obs_t, action, reward, obs_tp1, done = data
-            obses_t.append(obs_t)
             actions.append(action)
             rewards.append(reward)
-            obses_tp1.append(obs_tp1)
+            # obses_t.append(obs_t)
+            # obses_tp1.append(obses_tp1)
+            for j in range(self.n_agents):
+                obses_t[j].append(obs_t[j])
+                obses_tp1[j].append(obs_tp1[j])
             dones.append(done)
+        
         return obses_t, actions, rewards, obses_tp1, dones
 
     def sample(self, batch_size, **_kwargs):
-        print('batch_size', batch_size)
         """
         Sample a batch of experiences.
         :param batch_size: (int) How many transitions to sample.
@@ -257,9 +264,12 @@ def make_multiagent_env(scenario_name, benchmark=False):
     world = scenario.make_world()
     # create multiagent environment
     if benchmark:
-        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation, scenario.benchmark_data)
+        env = MultiAgentEnv(world, scenario.reset_world,
+                            scenario.reward, scenario.observation, scenario.
+                            benchmark_data)
     else:
-        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation)
+        env = MultiAgentEnv(world, scenario.reset_world,
+                            scenario.reward, scenario.observation)
     return env
 
     # env = make_env('simple_speaker_listener')
