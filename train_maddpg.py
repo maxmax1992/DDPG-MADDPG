@@ -68,14 +68,19 @@ def learn_episodic_DDPG(args):
         epr = 0
         print("episode ", ep)
         for t in range(args.T):
-            actions = trainer.get_actions(observations)
+            timesteps += 1
+            actions = trainer.get_actions(observations[0])
             actions = [[a.cpu().numpy() for a in actions]]
             # actions = [a.cpu().numpy() for a in actions]
             # print(actions)
             next_obs, rewards, dones, _ = env.step(actions)
-            print("NEXT OBS", next_obs[0])
-            trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs[0], dones))
-            done = all(dones) or t >= args.T
+            # if ep == 0: print("obs init", observations)
+            # if ep == 0 and t == 0: print("actions", actions)
+            # if ep == 0 and t == 0: print("next obs", next_obs)
+            # if ep == 0 and t == 0: print("rewards", rewards)
+            # if ep == 0 and t == 0: print("dones", dones)
+            trainer.store_transitions(*map_to_tensors(observations[0], actions[0], rewards[0], next_obs[0], dones[0]))
+            done = all(dones[0]) or t >= args.T
             if timesteps % args.steps_per_update == 0:
                 trainer.sample_and_train(args.batch_size)
             epr += np.mean(rewards)

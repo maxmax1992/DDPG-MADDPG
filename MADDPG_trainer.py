@@ -83,7 +83,7 @@ class MADDPG_Trainer:
         self.criterion = nn.MSELoss()
 
     def get_actions(self, states):
-        return [agent.select_action(state)[0] for agent, state in zip(self.agents, states[0])]
+        return [agent.select_action(state)[0] for agent, state in zip(self.agents, states)]
 
     def store_transitions(self, states, actions, rewards, next_states, dones):
         self.memory.add(states, actions, rewards, next_states, dones)
@@ -111,10 +111,10 @@ class MADDPG_Trainer:
 
             
 
-    def sample_and_train(self):
+    def sample_and_train(self, batch_size):
         for i, agent in enumerate(self.agents):
             # Q_next = Q(s1, s2, p(s1), p(s2))
-            batch = self.memory.sample(min(BATCH_SIZE, len(self.memory)))
+            batch = self.memory.sample(min(batch_size, len(self.memory)))
 
             states_i, actions_i, rewards_i, next_states_i, dones_i = batch
             actions_i = [[action.float().to(device) for action in acts] for acts in actions_i]
@@ -126,7 +126,7 @@ class MADDPG_Trainer:
                 self.transform_actions(actions_, len(rewards_i))
             target_q = self.agents[i].qnet_targ(q_input_obs, q_input_acts).detach()
             rewards = torch.tensor([reward[i] for reward in rewards_i]).view(-1, 1).float().to(device)
-            dones = torch.tensor([1 - done[i] for done in dones_i]).view(-1, 1).float().to(device)
+            dones = torch.tensor([1 - done[i].float() for done in dones_i]).view(-1, 1).float().to(device)
             target_q = rewards + dones * GAMMA * target_q
             # states_all_vf = torch.stack([torch.cat(g_state) for g_state in states])
             input_acts = torch.stack([torch.cat(agents_actions) for agents_actions in actions_i]).float().to(device)
