@@ -109,21 +109,28 @@ class MADDPG_Trainer:
             acts.append(torch.cat([f.float().to(device) for f in actions_]))
         return torch.stack(acts)
 
-            
+    def update_all_targets(self):
+        for agent in self.agents:
+            soft_update(agent.policy_targ, agent.policy, TAU)
+            soft_update(agent.qnet_targ, agent.qnet, TAU)
 
     def sample_and_train(self, batch_size):
+        
         for i, agent in enumerate(self.agents):
             # Q_next = Q(s1, s2, p(s1), p(s2))
+            # batch = self.memory.sample(min(batch_size, len(self.memory)))
             batch = self.memory.sample(min(batch_size, len(self.memory)))
 
             states_i, actions_i, rewards_i, next_states_i, dones_i = batch
+
             actions_i = [[action.float().to(device) for action in acts] for acts in actions_i]
-            # states_all = torch.stack[torch.cat(states_i)]
+
             actions_ = [self.agents[i].select_action(torch.stack(states_i[i]).to(device),
                         is_tensor=True, is_target=True) for i in range(self.n_agents)]
 
             q_input_obs, q_input_acts = self.transform_states(next_states_i, len(rewards_i)), \
                 self.transform_actions(actions_, len(rewards_i))
+            # states_all = torch.stack[torch.cat(states_i)]
             target_q = self.agents[i].qnet_targ(q_input_obs, q_input_acts).detach()
             rewards = torch.tensor([reward[i] for reward in rewards_i]).view(-1, 1).float().to(device)
             dones = torch.tensor([1 - done[i].float() for done in dones_i]).view(-1, 1).float().to(device)
@@ -132,7 +139,7 @@ class MADDPG_Trainer:
             input_acts = torch.stack([torch.cat(agents_actions) for agents_actions in actions_i]).float().to(device)
             input_obs = self.transform_states(states_i, len(rewards_i))
             
-            input_q = self.agents[i].qnet(input_obs, input_acts)
+            input_q = self.agents[i].qnet(input_obs.clone(), input_acts.clone())
             # print(input_q)
             self.agents[i].q_optimizer.zero_grad()
             loss = self.criterion(input_q, target_q)
@@ -160,12 +167,13 @@ class MADDPG_Trainer:
             actor_loss.backward()
             # nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
             self.agents[i].p_optimizer.step()
-            soft_update(self.agents[i].policy_targ, self.agents[i].policy, TAU)
-            soft_update(self.agents[i].qnet_targ, self.agents[i].qnet, TAU)
-            # if self.args.use_writer:
-            #     self.writer.add_scalar("critic_loss", loss_critic.item(), self.n_updates)
-            #     self.writer.add_scalar("actor_loss", actor_loss.item(), self.n_updates)
+        # if self.args.use_writer:
+        #     self.writer.add_scalar("critic_loss", loss_critic.item(), self.n_updates)
+        #     self.writer.add_scalar("actor_loss", actor_loss.item(), self.n_updates)
         
         #  CRITIC LOSS: Q(s, a) += (r + gamma*Q'(s, π'(s)) - Q(s, a))
         # onehot actions
+
+
+        self.update_all_targets()
         self.n_updates += 1
