@@ -4,7 +4,7 @@ import torch.optim as optim
 import numpy as np
 from NNets import Q_net, Policy_net
 from utils import soft_update, hard_update, ReplayMemory, LinearSchedule, \
-    Transition, OUNoise, gumbel_softmax, onehot_from_logits
+    Transition, OUNoise
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -17,19 +17,20 @@ E_GREEDY_STEPS = 30000
 INITIAL_STD = 2.0
 FINAL_STD = 0.1
 BATCH_SIZE = 64
+GRAD_CLIP = 3000 # change this, to ensure gradient clipping
+
 
 class DDPG_Agent:
-
+    
     def __init__(self, ob_sp, act_sp, alow, ahigh, writer, args):
         self.args = args
         self.alow = alow
         self.ahigh = ahigh
-        self.act_sp = act_sp
         self.policy = Policy_net(ob_sp, act_sp)
         self.policy_targ = Policy_net(ob_sp, act_sp)
         self.qnet = Q_net(ob_sp, act_sp)
         self.qnet_targ = Q_net(ob_sp, act_sp)
-    
+
         self.policy.to(device)
         self.qnet.to(device)
         self.policy_targ.to(device)
@@ -51,17 +52,12 @@ class DDPG_Agent:
 
     def get_action(self, state):
         if self.args.use_ounoise:
-            noise = self.noise.sample()
+            noise = self.noise.sample()[0]
         else:
-            noise = np.random.normal(0, self.epsilon_scheduler.value(self.n_steps), self.act_sp)
+            noise = np.random.normal(0, self.epsilon_scheduler.value(self.n_steps))
         st = torch.from_numpy(state).view(1, -1).float()
         action = self.policy(st)
-        if self.args.discrete_action:
-            # action_with_noise = action + torch.from_numpy(noise).to(device).float()
-            # action_with_noise = action_with_noise.argmax().item()
-            action_with_noise = gumbel_softmax(action, hard=True).argmax().item()
-        else:
-            action_with_noise = np.clip(action.item() + noise[0], self.alow, self.ahigh)
+        action_with_noise = np.clip(action.item() + noise, self.alow, self.ahigh)
         if self.args.use_writer:
             self.writer.add_scalar("action mean", action.item(), self.n_steps)
             self.writer.add_scalar("action noise", noise, self.n_steps)
@@ -70,16 +66,8 @@ class DDPG_Agent:
         self.n_steps += 1
         return action_with_noise
 
-    def log_transition(self, state, action, reward, next_state, done):
-        print("State", state)
-        print("action", action)
-        print("reward", reward)
-        print("next state", next_state)
-        print("done", done)
-
-
     def store_transition(self, state, action, reward, next_state, done):
-        log_transition(state, action, reward, next_state, done)
+
         self.memory.push(torch.from_numpy(state), torch.tensor(action),
                          torch.tensor(reward), torch.from_numpy(next_state),
                          torch.tensor(done))
@@ -96,37 +84,24 @@ class DDPG_Agent:
             b_dict[4].view(-1, 1).float().to(device)
 
         #  CRITIC LOSS: Q(s, a) += (r + gamma*Q'(s, π'(s)) - Q(s, a))
-        # onehot actions
-        if self.args.discrete_action:
-            actions_one_hot = torch.zeros(actions.shape[0], self.act_sp).float().to(device)
-            actions_one_hot[torch.arange(actions.shape[0]), actions.view(-1)] = 1
-            # forward of the policy
-            inputs_critic = self.qnet(states, actions_one_hot)
-        else:
-            inputs_critic = self.qnet(states, actions)
+        # inputs computation
+        inputs_critic = self.qnet(states, actions)
         # targets
         with torch.no_grad():
-            # get one-hot actions from
-            policy_acts = onehot_from_logits(self.policy_targ(next_states))
+            policy_acts = self.policy_targ(next_states)
         targ_values = self.qnet_targ(next_states, policy_acts)
         targets_critics = rewards + GAMMA * (1 - dones) * targ_values
         loss_critic = self.MSE_loss(inputs_critic, targets_critics)
         self.q_optimizer.zero_grad()
         loss_critic.backward()
-        # nn.utils.clip_grad_norm_(self.qnet.parameters(), 5)
+        # nn.utils.clip_grad_norm_(self.qnet.parameters(), GRAD_CLIP)
         self.q_optimizer.step()
 
-        # ACTOR gradient ascent of Q(s, π(s | ø)) with respect to ø
-        if self.args.discrete_action:
-            # use gumbel softmax max temp trick
-            gumbel_sample = gumbel_softmax(self.policy(states), hard=True)
-            actor_loss = - self.qnet(states, gumbel_sample).mean()
-        else:
-            actor_loss = - self.qnet(states, self.policy(states)).mean()
-
+        # ACTOR objective: derivative of Q(s, π(s | ø)) with respect to ø
+        actor_loss = - self.qnet(states, self.policy(states)).mean()
         self.p_optimizer.zero_grad()
         actor_loss.backward()
-        # nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
+        # nn.utils.clip_grad_norm_(self.policy.parameters(), GRAD_CLIP)
         self.p_optimizer.step()
         soft_update(self.policy_targ, self.policy, TAU)
         soft_update(self.qnet_targ, self.qnet, TAU)

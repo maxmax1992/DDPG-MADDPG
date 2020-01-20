@@ -2,39 +2,32 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from NNets import Q_net, Policy_net
-from utils import soft_update, hard_update, ReplayBuffer, LinearSchedule, \
-    Transition, OUNoise, gumbel_softmax, onehot_from_logits
+from NNets import MLPNetwork
+from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax
+from buffer import ReplayBuffer
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 MEMORY_SIZE = int(1e6)
 GAMMA = 0.99
-LR = 1e-2
-TAU = 1e-2
+LR = 1e-3
+TAU = 1e-3
 WARMUP_STEPS = 20000
 E_GREEDY_STEPS = 30000
 INITIAL_STD = 2.0
 FINAL_STD = 0.1
 BATCH_SIZE = 64
 
-def log_transition(self, state, action, reward, next_state, done):
-        print("State", state)
-        print("action", action)
-        print("reward", reward)
-        print("next state", next_state)
-        print("done", done)
-
 class DDPG_agent:
 
-    def __init__(self, act_sp, ob_sp, all_obs, all_acts):
+    def __init__(self, act_sp, ob_sp, all_obs, all_acts, hidden_dim=64):
         self.act_sp = act_sp
         self.ob_sp = ob_sp
 
-        self.policy = Policy_net(ob_sp, act_sp)
-        self.policy_targ = Policy_net(ob_sp, act_sp)
-        self.qnet = Q_net(all_obs, all_acts)
-        self.qnet_targ = Q_net(all_obs, all_acts)
+        self.policy = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
+        self.policy_targ = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
+        self.qnet = MLPNetwork(all_obs + all_acts, 1, constrain_out=False, hidden_dim=hidden_dim).to(device)
+        self.qnet_targ = MLPNetwork(all_obs + all_acts, 1, constrain_out=False, hidden_dim=hidden_dim).to(device)
 
         self.policy.to(device)
         self.qnet.to(device)
@@ -51,8 +44,8 @@ class DDPG_agent:
         # TODO after finished: add temperature to Gumbel sampling
         st = state
         if not is_tensor:
-            st = torch.from_numpy(state).view(1, -1).float()
-        if is_target:  
+            st = torch.from_numpy(state).view(1, -1).float().to(device)
+        if is_target:
             action = self.policy_targ(st)
         else:
             action = self.policy(st)
@@ -68,15 +61,15 @@ class MADDPG_Trainer:
 
     def __init__(self, n_agents, act_spcs, ob_spcs, writer, args):
         self.args = args
-        self.memory = ReplayBuffer(int(1e6) // 2, len(act_spcs))
+        self.memory = ReplayBuffer(int(1e6) // 2, n_agents, device)
         self.epsilon_scheduler = LinearSchedule(E_GREEDY_STEPS, FINAL_STD, INITIAL_STD,
                                                 warmup_steps=WARMUP_STEPS)
         self.n_agents = n_agents
         self.act_spcs = act_spcs
         self.ob_spcs = ob_spcs
-        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], np.sum(self.ob_spcs), \
-            np.sum(self.act_spcs)) for i in range(n_agents)]
-
+        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], np.sum(self.ob_spcs),
+                       np.sum(self.act_spcs)) for i in range(n_agents)]
+        
         self.n_steps = 0
         self.n_updates = 0
         self.writer = writer
@@ -114,66 +107,74 @@ class MADDPG_Trainer:
             soft_update(agent.policy_targ, agent.policy, TAU)
             soft_update(agent.qnet_targ, agent.qnet, TAU)
 
+    def prep_training(self):
+        for agent in self.agents:
+            agent.qnet.train()
+            agent.policy.train()
+            agent.qnet_targ.train()
+            agent.policy_targ.train()
+
+    def eval(self):
+        for agent in self.agents:
+            agent.qnet.eval()
+            agent.policy.eval()
+            agent.qnet_targ.eval()
+            agent.policy_targ.eval()
+
     def sample_and_train(self, batch_size):
         
+        batch = self.memory.sample(min(batch_size, len(self.memory)))
+
+        states_i, actions_i, rewards_i, next_states_i, dones_i = batch
+        
+        next_actions_all = [self.agents[i].select_action((states_i[i]).to(device).float(),
+                            is_tensor=True, is_target=True) for i in range(self.n_agents)]
+
+        states_all = torch.cat(states_i, 1)
+        next_states_all = torch.cat(next_states_i, 1)
+        actions_all = torch.cat(actions_i, 1)
+        
         for i, agent in enumerate(self.agents):
-            # Q_next = Q(s1, s2, p(s1), p(s2))
-            # batch = self.memory.sample(min(batch_size, len(self.memory)))
-            batch = self.memory.sample(min(batch_size, len(self.memory)))
 
-            states_i, actions_i, rewards_i, next_states_i, dones_i = batch
-
-            actions_i = [[action.float().to(device) for action in acts] for acts in actions_i]
-
-            actions_ = [self.agents[i].select_action(torch.stack(states_i[i]).to(device),
-                        is_tensor=True, is_target=True) for i in range(self.n_agents)]
-
-            q_input_obs, q_input_acts = self.transform_states(next_states_i, len(rewards_i)), \
-                self.transform_actions(actions_, len(rewards_i))
-            # states_all = torch.stack[torch.cat(states_i)]
-            target_q = self.agents[i].qnet_targ(q_input_obs, q_input_acts).detach()
-            rewards = torch.tensor([reward[i] for reward in rewards_i]).view(-1, 1).float().to(device)
-            dones = torch.tensor([1 - done[i].float() for done in dones_i]).view(-1, 1).float().to(device)
+            # computing target
+            total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
+            target_q = self.agents[i].qnet_targ(total_obs).detach()
+            rewards = rewards_i[i].view(-1, 1)
+            dones = dones_i[i].view(-1, 1)
             target_q = rewards + dones * GAMMA * target_q
-            # states_all_vf = torch.stack([torch.cat(g_state) for g_state in states])
-            input_acts = torch.stack([torch.cat(agents_actions) for agents_actions in actions_i]).float().to(device)
-            input_obs = self.transform_states(states_i, len(rewards_i))
-            
-            input_q = self.agents[i].qnet(input_obs.clone(), input_acts.clone())
-            # print(input_q)
+
+            # computing the inputs
+            input_q = self.agents[i].qnet(torch.cat([states_all, actions_all], 1))
             self.agents[i].q_optimizer.zero_grad()
-            loss = self.criterion(input_q, target_q)
+            loss = self.criterion(input_q, target_q.detach())
             # print("LOSS", loss)
             loss.backward()
             self.agents[i].q_optimizer.step()
-            
+            actor_loss = 0
             # ACTOR gradient ascent of Q(s, π(s | ø)) with respect to ø
-            if self.args.discrete_action:
-                # use gumbel softmax max temp trick
-                gumbel_sample = gumbel_softmax(self.agents[i].policy(torch.stack(states_i[i])), hard=True)
-                # acts_to_forward = torch.stack([])
-                q_obs_t = self.transform_states(states_i, len(rewards_i))
+        
+            # use gumbel softmax max temp trick
+            gumbel_sample = gumbel_softmax(self.agents[i].policy(states_i[i]), hard=True)
 
-                for j, actions_batch in enumerate(actions_i):
-                    actions_batch[i] = gumbel_sample[j]
-                
-                actions_t = torch.stack([torch.cat(agents_acts) for agents_acts in actions_i]).float()
-                actor_loss = - self.agents[i].qnet(q_obs_t, actions_t).mean()
-            else:
-                # TODO handle continuous action space
-                pass
+            for action_batch in actions_i:
+                action_batch.detach_()
+            actions_i[i] = gumbel_sample
+
+            actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
+                                               torch.cat(actions_i, 1)], 1)).mean()
 
             self.agents[i].p_optimizer.zero_grad()
             actor_loss.backward()
             # nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
             self.agents[i].p_optimizer.step()
-        # if self.args.use_writer:
-        #     self.writer.add_scalar("critic_loss", loss_critic.item(), self.n_updates)
-        #     self.writer.add_scalar("actor_loss", actor_loss.item(), self.n_updates)
+            # detach the forward propagated action samples
+            actions_i[i].detach_()
+            
+            if self.args.use_writer:
+                self.writer.add_scalars("Agent%i/losses" % i, {
+                    "vf_loss": loss.item(),
+                    "policy_loss": actor_loss.item()
+                }, self.n_updates)
         
-        #  CRITIC LOSS: Q(s, a) += (r + gamma*Q'(s, π'(s)) - Q(s, a))
-        # onehot actions
-
-
         self.update_all_targets()
         self.n_updates += 1
