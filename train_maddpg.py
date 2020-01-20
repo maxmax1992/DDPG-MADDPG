@@ -18,6 +18,7 @@ def get_args():
     parser.add_argument("--use_ounoise", action="store_true", help="Use OUNoise")
     parser.add_argument("--lograte", default=100, type=int, help="Log frequency")
     parser.add_argument("--train_freq", default=100, type=int, help="Training frequency")
+    parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--batch_size", default=1024, type=int, help="Batch size for training")
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()

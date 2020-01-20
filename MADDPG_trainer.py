@@ -61,7 +61,7 @@ class MADDPG_Trainer:
 
     def __init__(self, n_agents, act_spcs, ob_spcs, writer, args):
         self.args = args
-        self.memory = ReplayBuffer(int(1e6) // 2, n_agents, device)
+        self.memory = ReplayBuffer(args.buffer_length, n_agents, device)
         self.epsilon_scheduler = LinearSchedule(E_GREEDY_STEPS, FINAL_STD, INITIAL_STD,
                                                 warmup_steps=WARMUP_STEPS)
         self.n_agents = n_agents
@@ -122,29 +122,24 @@ class MADDPG_Trainer:
             agent.policy_targ.eval()
 
     def sample_and_train(self, batch_size):
-        
+        # TODO ADD Model saving, optimize code
         batch = self.memory.sample(min(batch_size, len(self.memory)))
 
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
-
-        next_actions_all = [onehot_from_logits(agent.policy_targ(next_state))
-                            for agent, next_state in zip(self.agents, next_states_i)]
-
-        actions_curr_pols = [onehot_from_logits(agent.policy(state))
-                             for agent, state in zip(self.agents, states_i)]
 
         states_all = torch.cat(states_i, 1)
         next_states_all = torch.cat(next_states_i, 1)
         actions_all = torch.cat(actions_i, 1)
         
         for i, agent in enumerate(self.agents):
-
+            next_actions_all = [onehot_from_logits(ag.policy_targ(next_state))
+                                for ag, next_state in zip(self.agents, next_states_i)]
             # computing target
             total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
             target_q = self.agents[i].qnet_targ(total_obs).detach()
             rewards = rewards_i[i].view(-1, 1)
             dones = dones_i[i].view(-1, 1)
-            target_q = rewards + dones * GAMMA * target_q
+            target_q = rewards + (1 - dones) * GAMMA * target_q
 
             # computing the inputs
             input_q = self.agents[i].qnet(torch.cat([states_all, actions_all], 1))
@@ -160,6 +155,9 @@ class MADDPG_Trainer:
             # use gumbel softmax max temp trick
             policy_out = self.agents[i].policy(states_i[i])
             gumbel_sample = gumbel_softmax(policy_out, hard=True)
+
+            actions_curr_pols = [onehot_from_logits(agent_.policy(state))
+                                 for agent_, state in zip(self.agents, states_i)]
 
             for action_batch in actions_curr_pols:
                 action_batch.detach_()
