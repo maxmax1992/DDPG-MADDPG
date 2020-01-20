@@ -23,7 +23,7 @@ def get_args():
     return parser.parse_args()
 
 
-def learn_episodic_DDPG(args):
+def learn_episodic_MADDPG(args):
     ###
     args.env = "simple_speaker_listener"
     # args.discrete_action = True
@@ -35,8 +35,8 @@ def learn_episodic_DDPG(args):
     n_agents = len(env.agents)
     action_spaces = [act_sp.n for act_sp in env.action_space]
     observation_spaces = [ob_sp.shape[0] for ob_sp in env.observation_space]
-
-    writer = SummaryWriter() if args.use_writer else None
+    log_dir = "maddpg_test_run"
+    writer = SummaryWriter(log_dir) if args.use_writer else None
     running_rewards = deque([], maxlen=args.lograte)
     # discrete actions maddpg agentgent
     # agent = None
@@ -48,7 +48,6 @@ def learn_episodic_DDPG(args):
         observations = env.reset()
         trainer.reset()
         done = False
-        print("EPISODE ", ep)
         for t in range(args.T):
             timesteps += 1
             actions = trainer.get_actions(observations)
@@ -78,6 +77,8 @@ def learn_episodic_DDPG(args):
         if (ep + 1) % args.lograte == 0:
             print(f"episode: {ep}, running episode rewards: {np.mean(running_rewards)}")
         # TODO ADD logging to the
+    writer.export_scalars_to_json(str(log_dir / 'summary.json'))
+    writer.close()
         
     return 0
 
@@ -86,7 +87,7 @@ if __name__ == '__main__':
     N_EPS = 10000
     args = get_args()
     # rewards_DQN_dueling = learn_episodic_DQN(N_EPS, 500, use_dueling=True)
-    rewards_DDPG = learn_episodic_DDPG(args)
+    rewards_DDPG = learn_episodic_MADDPG(args)
     # plt.plot(moving_average(rewards_DDPG, 100), label="DDPG")
     # plt.legend()
     # plt.show()

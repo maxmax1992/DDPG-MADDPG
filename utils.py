@@ -64,7 +64,6 @@ def gumbel_softmax(logits, temperature=1.0, hard=False):
         y = (y_hard - y).detach() + y
     return y
 
-
 class OUNoise:
     
     def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2):

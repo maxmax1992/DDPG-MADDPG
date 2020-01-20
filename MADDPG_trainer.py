@@ -3,15 +3,15 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from NNets import MLPNetwork
-from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax
+from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax, onehot_from_logits
 from buffer import ReplayBuffer
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 MEMORY_SIZE = int(1e6)
-GAMMA = 0.99
-LR = 1e-3
-TAU = 1e-3
+GAMMA = 0.95
+LR = 1e-2
+TAU = 1e-2
 WARMUP_STEPS = 20000
 E_GREEDY_STEPS = 30000
 INITIAL_STD = 2.0
@@ -126,9 +126,12 @@ class MADDPG_Trainer:
         batch = self.memory.sample(min(batch_size, len(self.memory)))
 
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
-        
-        next_actions_all = [self.agents[i].select_action((states_i[i]).to(device).float(),
-                            is_tensor=True, is_target=True) for i in range(self.n_agents)]
+
+        next_actions_all = [onehot_from_logits(agent.policy_targ(next_state))
+                            for agent, next_state in zip(self.agents, next_states_i)]
+
+        actions_curr_pols = [onehot_from_logits(agent.policy(state))
+                             for agent, state in zip(self.agents, states_i)]
 
         states_all = torch.cat(states_i, 1)
         next_states_all = torch.cat(next_states_i, 1)
@@ -149,31 +152,35 @@ class MADDPG_Trainer:
             loss = self.criterion(input_q, target_q.detach())
             # print("LOSS", loss)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.agents[i].qnet.parameters(), 0.5)
             self.agents[i].q_optimizer.step()
             actor_loss = 0
             # ACTOR gradient ascent of Q(s, π(s | ø)) with respect to ø
         
             # use gumbel softmax max temp trick
-            gumbel_sample = gumbel_softmax(self.agents[i].policy(states_i[i]), hard=True)
+            policy_out = self.agents[i].policy(states_i[i])
+            gumbel_sample = gumbel_softmax(policy_out, hard=True)
 
-            for action_batch in actions_i:
+            for action_batch in actions_curr_pols:
                 action_batch.detach_()
-            actions_i[i] = gumbel_sample
+            actions_curr_pols[i] = gumbel_sample
 
             actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
-                                               torch.cat(actions_i, 1)], 1)).mean()
+                                               torch.cat(actions_curr_pols, 1)], 1)).mean()
+            actor_loss += (policy_out**2).mean() * 1e-3
 
             self.agents[i].p_optimizer.zero_grad()
             actor_loss.backward()
             # nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
+            torch.nn.utils.clip_grad_norm_(self.agents[i].policy.parameters(), 0.5)
             self.agents[i].p_optimizer.step()
             # detach the forward propagated action samples
             actions_i[i].detach_()
-            
+
             if self.args.use_writer:
-                self.writer.add_scalars("Agent%i/losses" % i, {
-                    "vf_loss": loss.item(),
-                    "policy_loss": actor_loss.item()
+                self.writer.add_scalars("Agent_%i" % i, {
+                    "vf_loss": loss,
+                    "actor_loss": actor_loss
                 }, self.n_updates)
         
         self.update_all_targets()
