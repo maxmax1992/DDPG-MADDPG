@@ -1,6 +1,7 @@
 # import sys
 # sys.path.append('.')
 import numpy as np
+import torch
 import argparse
 from collections import deque
 from MADDPG_trainer import MADDPG_Trainer
@@ -20,9 +21,11 @@ def get_args():
     parser.add_argument("--train_freq", default=100, type=int, help="Training frequency")
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--batch_size", default=1024, type=int, help="Batch size for training")
+    parser.add_argument('--save_dir', default='runs/checkpoints', help="directory where to save models")
+    parser.add_argument("--load_file", default="", required=False, help="load model from specified file")
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
-
+    
 
 def learn_episodic_MADDPG(args):
     ###
@@ -43,9 +46,23 @@ def learn_episodic_MADDPG(args):
     # agent = None
     trainer = MADDPG_Trainer(n_agents, action_spaces, observation_spaces, writer, args)
     trainer.eval()
-    timesteps = 0
+    # TODO maybe change this to specified amount
+    model_save_rate = 100
     episode_rewards = [0.0]
-    for ep in range(args.n_eps):
+    timesteps = 0
+    start_ep = 0
+    # try to load from givern checkpoint file
+    if args.load_file != "":
+        try:
+            # load dict file
+            checkpoint = torch.load(args.load_file)
+            trainer.load_model(checkpoint)
+            timesteps = checkpoint['timesteps']
+            start_ep = checkpoint['start_ep']
+        except Exception:
+            print("Unable to load from specified checkpoint")
+
+    for ep in range(start_ep, args.n_eps):
         observations = env.reset()
         trainer.reset()
         done = False
@@ -70,6 +87,13 @@ def learn_episodic_MADDPG(args):
 
             if done:
                 break
+        if (ep + 1) % model_save_rate == 0:
+            savedir = args.save_dir + 'episode' + str(ep)
+            torch.save({
+                'timesteps': timesteps,
+                'start_ep': ep,
+                **trainer.get_save_data
+            }, savedir)
 
         if args.use_writer:
             writer.add_scalar('rewards', episode_rewards[-1] / n_agents, ep)

@@ -114,6 +114,14 @@ class MADDPG_Trainer:
             agent.qnet_targ.train()
             agent.policy_targ.train()
 
+    def get_save_data(self):
+        # TODO
+        pass
+
+    def load_models(self, checkpoints):
+        # TODO
+        pass
+
     def eval(self):
         for agent in self.agents:
             agent.qnet.eval()
