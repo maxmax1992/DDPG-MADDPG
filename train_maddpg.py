@@ -5,7 +5,7 @@ import torch
 import argparse
 from collections import deque
 from MADDPG_trainer import MADDPG_Trainer
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 from utils import make_multiagent_env, map_to_tensors
 
 
@@ -56,7 +56,7 @@ def learn_episodic_MADDPG(args):
         try:
             # load dict file
             checkpoint = torch.load(args.load_file)
-            trainer.load_model(checkpoint)
+            trainer.load_models(checkpoint)
             timesteps = checkpoint['timesteps']
             start_ep = checkpoint['start_ep']
         except Exception:
