@@ -87,13 +87,13 @@ def learn_episodic_MADDPG(args):
 
             if done:
                 break
-        if (ep + 1) % model_save_rate == 0:
-            savedir = args.save_dir + 'episode' + str(ep)
-            torch.save({
-                'timesteps': timesteps,
-                'start_ep': ep,
-                **trainer.get_save_data
-            }, savedir)
+        # if (ep + 1) % model_save_rate == 0:
+        #     savedir = args.save_dir + 'episode' + str(ep)
+        #     torch.save({
+        #         'timesteps': timesteps,
+        #         'start_ep': ep,
+        #         **trainer.get_save_data()
+        #     }, savedir)
 
         if args.use_writer:
             writer.add_scalar('rewards', episode_rewards[-1] / n_agents, ep)
