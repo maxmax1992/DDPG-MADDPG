@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from NNets import MLPNetwork
-from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax, onehot_from_logits
+from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax, onehot_from_logits, OUNoise
 from buffer import ReplayBuffer
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -20,10 +20,14 @@ BATCH_SIZE = 64
 
 class DDPG_agent:
 
-    def __init__(self, act_sp, ob_sp, all_obs, all_acts, hidden_dim=64):
+    def __init__(self, act_sp, ob_sp, all_obs, all_acts, hidden_dim=64, continuous_action=False,
+                 act_boundaries=(0, 1)):
         self.act_sp = act_sp
         self.ob_sp = ob_sp
-
+        self.continuous_action = continuous_action
+        if self.continuous_action:
+            self.exploration = OUNoise(act_sp)
+        self.act_boundaries = act_boundaries
         self.policy = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
         self.policy_targ = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
         self.qnet = MLPNetwork(all_obs + all_acts, 1, constrain_out=False, hidden_dim=hidden_dim).to(device)
@@ -40,6 +44,13 @@ class DDPG_agent:
         self.p_optimizer = optim.Adam(self.policy.parameters(), lr=LR)
         self.q_optimizer = optim.Adam(self.qnet.parameters(), lr=LR)
 
+    def select_greedy_from_target(self, states, use_target=True):
+        policy = self.policy_targ if use_target else self.policy
+        if self.continuous_action:
+            return policy(states)
+        else:
+            return onehot_from_logits(policy(states))
+
     def select_action(self, state, temperature=None, is_tensor=False, is_target=False):
         # TODO after finished: add temperature to Gumbel sampling
         st = state
@@ -49,6 +60,10 @@ class DDPG_agent:
             action = self.policy_targ(st)
         else:
             action = self.policy(st)
+        if self.continuous_action:
+            action_with_noise = action.detach() + self.exploration.noise()
+            action_with_noise.clamp(*self.act_boundaries)
+            return action
         action_with_noise = gumbel_softmax(action, hard=True).detach()
         return action_with_noise
 
@@ -56,9 +71,7 @@ class DDPG_agent:
         soft_update(self.policy_targ, self.policy, TAU)
         soft_update(self.qnet_targ, self.qnet, TAU)
 
-
 class MADDPG_Trainer:
-
     def __init__(self, n_agents, act_spcs, ob_spcs, writer, args):
         self.args = args
         self.memory = ReplayBuffer(args.buffer_length, n_agents, device)
@@ -68,8 +81,7 @@ class MADDPG_Trainer:
         self.act_spcs = act_spcs
         self.ob_spcs = ob_spcs
         self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], np.sum(self.ob_spcs),
-                       np.sum(self.act_spcs)) for i in range(n_agents)]
-        
+                       np.sum(self.act_spcs)) for i in range(n_agents)]  
         self.n_steps = 0
         self.n_updates = 0
         self.writer = writer
@@ -140,7 +152,7 @@ class MADDPG_Trainer:
         actions_all = torch.cat(actions_i, 1)
         
         for i, agent in enumerate(self.agents):
-            next_actions_all = [onehot_from_logits(ag.policy_targ(next_state))
+            next_actions_all = [ag.select_greedy_from_target(next_state)
                                 for ag, next_state in zip(self.agents, next_states_i)]
             # computing target
             total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
@@ -162,18 +174,23 @@ class MADDPG_Trainer:
         
             # use gumbel softmax max temp trick
             policy_out = self.agents[i].policy(states_i[i])
-            gumbel_sample = gumbel_softmax(policy_out, hard=True)
+            if not self.agents[i].continuous_action:
+                acts_agent = gumbel_softmax(policy_out, hard=True)
+            else:
+                acts_agent = policy_out
 
-            actions_curr_pols = [onehot_from_logits(agent_.policy(state))
+            actions_curr_pols = [agent_.select_greedy_from_target(state, use_target=False)
                                  for agent_, state in zip(self.agents, states_i)]
 
             for action_batch in actions_curr_pols:
                 action_batch.detach_()
-            actions_curr_pols[i] = gumbel_sample
+            actions_curr_pols[i] = acts_agent
 
             actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
                                                torch.cat(actions_curr_pols, 1)], 1)).mean()
-            actor_loss += (policy_out**2).mean() * 1e-3
+                                               
+            if not self.agents[i].continuous_action:
+                actor_loss += (policy_out**2).mean() * 1e-3
 
             self.agents[i].p_optimizer.zero_grad()
             actor_loss.backward()

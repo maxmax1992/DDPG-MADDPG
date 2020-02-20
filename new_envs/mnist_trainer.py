@@ -5,11 +5,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import StepLR
 
+use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 
-def get_parser(self):
+def get_parser():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
     parser.add_argument('--batch-size', type=int, default=64, metavar='N',
@@ -18,7 +18,7 @@ def get_parser(self):
                         help='input batch size for testing (default: 1000)')
     parser.add_argument('--epochs', type=int, default=14, metavar='N',
                         help='number of epochs to train (default: 14)')
-    parser.add_argument('--lr', type=float, default=1.0, metavar='LR',
+    parser.add_argument('--lr', type=float, default=1e-2, metavar='LR',
                         help='learning rate (default: 1.0)')
     parser.add_argument('--gamma', type=float, default=0.7, metavar='M',
                         help='Learning rate step gamma (default: 0.7)')
@@ -58,9 +58,23 @@ class Net(nn.Module):
         return output
 
 
+def test(args, model, device, test_loader):
+    model.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+            correct += pred.eq(target.view_as(pred)).sum().item()
 
+    test_loss /= len(test_loader.dataset)
+    return - test_loss
 
 def train(args, model, device, train_loader, optimizer, epoch):
+
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
@@ -75,92 +89,34 @@ def train(args, model, device, train_loader, optimizer, epoch):
                 100. * batch_idx / len(train_loader), loss.item()))
 
 class MNIST_trainer_wrapper():
-
     def __init__(self):
         self.args = get_parser().parse_args()
         torch.manual_seed(self.args.seed)
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
         self.train_loader = torch.utils.data.DataLoader(
-            datasets.MNIST('../data', train=True, download=True,
-                        transform=transforms.Compose([
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.1307,), (0.3081,))
-                        ])),
+            datasets.MNIST('data', train=True, download=True, transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.1307,), (0.3081,))
+            ])),
             batch_size=self.args.batch_size, shuffle=True, **kwargs)
         self.test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST('../data', train=False, transform=transforms.Compose([
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.1307,), (0.3081,))
-                        ])),
+            datasets.MNIST('data', train=False, transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.1307,), (0.3081,))
+            ])),
             batch_size=self.args.test_batch_size, shuffle=True, **kwargs)
 
-        model = Net().to(device)
-        optimizer = optim.Adadelta(model.parameters(), lr=self.args.lr)
-
-        scheduler = StepLR(optimizer, step_size=1, gamma=self.args.gamma)
-        for epoch in range(1, self.args.epochs + 1):
-            train(self.args, model, device, train_loader, optimizer, epoch)
-            test(self.args, model, device, test_loader)
-            scheduler.step()
-
-    def init_model(self):
-        pass
+        # optimizer.step()
+        self.set_model(0.25, 0.5, self.args.lr)
+        self.N = 1
         # if args.save_model:
         # torch.save(model.state_dict(), "mnist_cnn.pt")
 
-def test(args, model, device, test_loader):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
-            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
+    def step(self):
+        for epoch in range(1, 1 + self.N):
+            train(self.args, self.model, self.device, self.train_loader, self.optimizer, epoch)
+            test(self.args, self.model, device, self.test_loader)
 
-    test_loss /= len(test_loader.dataset)
-
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
-
-
-def main():
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-
-    torch.manual_seed(args.seed)
-
-    device = torch.device("cuda" if use_cuda else "cpu")
-
-    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-    train_loader = torch.utils.data.DataLoader(
-        datasets.MNIST('../data', train=True, download=True,
-                       transform=transforms.Compose([
-                           transforms.ToTensor(),
-                           transforms.Normalize((0.1307,), (0.3081,))
-                       ])),
-        batch_size=args.batch_size, shuffle=True, **kwargs)
-    test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST('../data', train=False, transform=transforms.Compose([
-                           transforms.ToTensor(),
-                           transforms.Normalize((0.1307,), (0.3081,))
-                       ])),
-        batch_size=args.test_batch_size, shuffle=True, **kwargs)
-
-    model = Net().to(device)
-    optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
-
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
-    for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
-        test(args, model, device, test_loader)
-        scheduler.step()
-
-    # if args.save_model:
-    #     torch.save(model.state_dict(), "mnist_cnn.pt")
-
-
-if __name__ == '__main__':
-    main()
+    def set_model(self, dropout_1, dropout_2, lr):
+        self.model = Net(dropout_1, dropout_2).to(device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr)
