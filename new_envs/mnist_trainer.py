@@ -1,10 +1,13 @@
 from __future__ import print_function
 import argparse
 import torch
+import gym
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
+from collections import deque
 
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
@@ -88,8 +91,12 @@ def train(args, model, device, train_loader, optimizer, epoch):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
 
-class MNIST_trainer_wrapper():
+class Mnist_hyperparam_env():
     def __init__(self):
+        import sys
+        sys.argv = ['']
+        del sys
+
         self.args = get_parser().parse_args()
         torch.manual_seed(self.args.seed)
         kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
@@ -108,14 +115,57 @@ class MNIST_trainer_wrapper():
 
         # optimizer.step()
         self.set_model(0.25, 0.5, self.args.lr)
-        self.N = 1
-        # if args.save_model:
-        # torch.save(model.state_dict(), "mnist_cnn.pt")
+        self.set_model(0.25, 0.5, self.args.lr)
+        # self.agents = [{} for i in range()]
+        self.N_optim = 3
+        self.agents = [{} for i in range(self.N_optim)]
 
-    def step(self):
-        for epoch in range(1, 1 + self.N):
-            train(self.args, self.model, self.device, self.train_loader, self.optimizer, epoch)
-            test(self.args, self.model, device, self.test_loader)
+        self.action_space = [
+            # dropout space
+            gym.spaces.Box(np.array([0]), np.array([1])),
+            # dropout 2 space
+            gym.spaces.Box(np.array([0]), np.array([1])),
+            # learning rate space
+            gym.spaces.Box(np.array([1e-5]), np.array([1e-1]))
+        ]
+        self.l_past_actions = 20
+        self.l_past_rewards = 40
+        self.collaborative = True
+        self.observation_space = [np.zeros(100), np.zeros(100), np.zeros(100)]
+        self.agent_hyperparameter_history = [deque([0 for i in range(self.l_past_actions)],
+                                             maxlen=self.l_past_actions) for j in range(self.N_optim)]
+        self.rewards_history = deque([0 for i in range(self.l_past_rewards)], self.l_past_rewards)
+        self.epoch_per_episode = 1
+    
+    def get_obs_for_agents(self):
+        result_arr = []
+        for i in range(self.N_optim):
+            past_acts = np.concatenate([np.array(hyp) for hyp in self.agent_hyperparameter_history])
+            rews = np.array(self.rewards_history)
+            result_arr.append(np.concatenate((past_acts, rews)))
+        return result_arr
+
+    def reset(self):
+        return self.get_obs_for_agents()
+
+    # actions = [[dp1], [dp2], [lr]]
+    def step(self, actions):
+        dp1 = actions[0][0]
+        dp2 = actions[1][0]
+        lr = actions[2][0]
+        self.set_model(dp1, dp2, lr)
+        reward = self.train_for_epochs()
+        self.agent_hyperparameter_history[0].append(dp1)
+        self.agent_hyperparameter_history[1].append(dp2)
+        self.agent_hyperparameter_history[2].append(lr)
+        self.rewards_history.append(reward)
+        obses = self.get_obs_for_agents()
+        return obses, [reward], [True for i in range(self.N_optim)], {}
+
+    def train_for_epochs(self):
+        for epoch in range(1, 1 + self.epoch_per_episode):
+            train(self.args, self.model, device, self.train_loader, self.optimizer, epoch)
+            return test(self.args, self.model, device, self.test_loader)
 
     def set_model(self, dropout_1, dropout_2, lr):
         self.model = Net(dropout_1, dropout_2).to(device)

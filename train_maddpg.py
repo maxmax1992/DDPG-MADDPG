@@ -5,9 +5,9 @@ import torch
 import argparse
 from collections import deque
 from MADDPG_trainer import MADDPG_Trainer
-# from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from utils import make_multiagent_env, map_to_tensors
-
+from new_envs.mnist_trainer import Mnist_hyperparam_env
 
 def get_args():
     parser = argparse.ArgumentParser(description=None)
@@ -23,28 +23,29 @@ def get_args():
     parser.add_argument("--batch_size", default=1024, type=int, help="Batch size for training")
     parser.add_argument('--save_dir', default='runs/checkpoints', help="directory where to save models")
     parser.add_argument("--load_file", default="", required=False, help="load model from specified file")
+    parser.add_argument("--hyperopt_env", action="store_true", help="Use hyperOptim env")
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
-    
 
-def learn_episodic_MADDPG(args):
-    ###
+def learn_episodic_MADDPG(args, env=None):
+
     args.env = "simple_speaker_listener"
     # args.discrete_action = True
-    env = make_multiagent_env(args.env)
+    if env is None:
+        env = make_multiagent_env(args.env)
 
     # print(act_sp)
     if not args.use_writer:
         print("not using writer")
     n_agents = len(env.agents)
-    action_spaces = [act_sp.n for act_sp in env.action_space]
+    # action_spaces = [act_sp.n for act_sp in env.action_space]
     observation_spaces = [ob_sp.shape[0] for ob_sp in env.observation_space]
     log_dir = "maddpg_test_run"
     writer = SummaryWriter(log_dir) if args.use_writer else None
     running_rewards = deque([], maxlen=args.lograte)
     # discrete actions maddpg agentgent
     # agent = None
-    trainer = MADDPG_Trainer(n_agents, action_spaces, observation_spaces, writer, args)
+    trainer = MADDPG_Trainer(n_agents, env.action_space, observation_spaces, writer, args)
     trainer.eval()
     # TODO maybe change this to specified amount
     model_save_rate = 100
@@ -69,7 +70,8 @@ def learn_episodic_MADDPG(args):
         for t in range(args.T):
             timesteps += 1
             actions = trainer.get_actions(observations)
-            actions = [a.cpu().numpy() for a in actions]
+            # TODO fix action to better
+            actions = [a.detach().cpu().numpy() for a in actions]
             # print(actions)
             next_obs, rewards, dones, _ = env.step(actions)
             trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
@@ -87,6 +89,7 @@ def learn_episodic_MADDPG(args):
 
             if done:
                 break
+            
         # if (ep + 1) % model_save_rate == 0:
         #     savedir = args.save_dir + 'episode' + str(ep)
         #     torch.save({
@@ -107,12 +110,16 @@ def learn_episodic_MADDPG(args):
         
     return 0
 
-
 if __name__ == '__main__':
     N_EPS = 10000
+    env = None
     args = get_args()
+    print("ARGS", args)
     # rewards_DQN_dueling = learn_episodic_DQN(N_EPS, 500, use_dueling=True)
-    rewards_DDPG = learn_episodic_MADDPG(args)
+    if args.hyperopt_env:
+        env = Mnist_hyperparam_env()
+    
+    rewards_DDPG = learn_episodic_MADDPG(args, env)
     # plt.plot(moving_average(rewards_DDPG, 100), label="DDPG")
-    # plt.legend()
+    # plt.legen d()
     # plt.show()

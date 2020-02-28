@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+from gym.spaces import Box
 from NNets import MLPNetwork
 from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax, onehot_from_logits, OUNoise
 from buffer import ReplayBuffer
@@ -20,9 +21,7 @@ BATCH_SIZE = 64
 
 class DDPG_agent:
 
-    def __init__(self, act_sp, ob_sp, all_obs, all_acts, hidden_dim=64, continuous_action=False,
-                 act_boundaries=(0, 1)):
-        self.act_sp = act_sp
+    def __init__(self, act_sp, ob_sp, all_obs, all_acts, continuous_action, hidden_dim=64, act_boundaries=(0, 1)):
         self.ob_sp = ob_sp
         self.continuous_action = continuous_action
         if self.continuous_action:
@@ -61,10 +60,14 @@ class DDPG_agent:
         else:
             action = self.policy(st)
         if self.continuous_action:
-            action_with_noise = action.detach() + self.exploration.noise()
-            action_with_noise.clamp(*self.act_boundaries)
-            return action
+            print("CONT ACTION")
+            action_with_noise = action.detach() + torch.from_numpy(self.exploration.noise()).float().to(device)
+            action_with_noise = action_with_noise.clamp(*self.act_boundaries).detach()
+            print(self.act_boundaries)
+            print("ACTION: ", action_with_noise)
+            return action_with_noise
         action_with_noise = gumbel_softmax(action, hard=True).detach()
+        print("DISCRETE ACTION")
         return action_with_noise
 
     def update_targets(self):
@@ -78,10 +81,10 @@ class MADDPG_Trainer:
         self.epsilon_scheduler = LinearSchedule(E_GREEDY_STEPS, FINAL_STD, INITIAL_STD,
                                                 warmup_steps=WARMUP_STEPS)
         self.n_agents = n_agents
-        self.act_spcs = act_spcs
         self.ob_spcs = ob_spcs
-        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], np.sum(self.ob_spcs),
-                       np.sum(self.act_spcs)) for i in range(n_agents)]  
+        self.act_spcs = [1 if isinstance(act_spcs[i], Box) else act_spcs[i].n for i in range(n_agents)]
+        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], np.sum(self.ob_spcs), np.sum(self.act_spcs),
+                       isinstance(act_spcs[i], Box)) for i in range(n_agents)]
         self.n_steps = 0
         self.n_updates = 0
         self.writer = writer
