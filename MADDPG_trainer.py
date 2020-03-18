@@ -60,14 +60,14 @@ class DDPG_agent:
         else:
             action = self.policy(st)
         if self.continuous_action:
-            print("CONT ACTION")
+            # print("CONT ACTION")
             action_with_noise = action.detach() + torch.from_numpy(self.exploration.noise()).float().to(device)
             action_with_noise = action_with_noise.clamp(*self.act_boundaries).detach()
-            print(self.act_boundaries)
-            print("ACTION: ", action_with_noise)
+            # print(self.act_boundaries)
+            # print("ACTION: ", action_with_noise)
             return action_with_noise
         action_with_noise = gumbel_softmax(action, hard=True).detach()
-        print("DISCRETE ACTION")
+        # print("DISCRETE ACTION")
         return action_with_noise
 
     def update_targets(self):
