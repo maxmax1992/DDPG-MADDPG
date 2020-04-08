@@ -24,8 +24,8 @@ def get_args():
 
 def learn_episodic_DDPG(args):
     ###
-    args.env = "CartPole-v0"
-    args.discrete_action = True
+    # args.env = "CartPole-v0"
+    # args.discrete_action = True
 
     env = gym.make(args.env)
     ob_sp = env.observation_space.shape[0]
