@@ -10,13 +10,13 @@ from buffer import ReplayBuffer
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 MEMORY_SIZE = int(1e6)
-GAMMA = 0.95
-LR = 1e-2
-TAU = 1e-2
-WARMUP_STEPS = 20000
-E_GREEDY_STEPS = 30000
-INITIAL_STD = 2.0
-FINAL_STD = 0.1
+GAMMA = 0.99
+LR = 1e-3
+TAU = 1e-3
+WARMUP_STEPS = 50000
+E_GREEDY_STEPS = 100000
+INITIAL_STD = 1.5
+FINAL_STD = 0.01
 BATCH_SIZE = 64
 
 class DDPG_agent:

@@ -1,5 +1,6 @@
 # import sys
 # sys.path.append('.')
+import gym
 import numpy as np
 import torch
 import argparse
@@ -8,13 +9,13 @@ from MADDPG_trainer import MADDPG_Trainer
 from torch.utils.tensorboard import SummaryWriter
 from utils import make_multiagent_env, map_to_tensors
 from new_envs.mnist_trainer import Mnist_hyperparam_env
-
+from gym.spaces import Box
 
 def get_args():
     parser = argparse.ArgumentParser(description=None)
     parser.add_argument('--env', default="simple", type=str, help='gym environment name')
     parser.add_argument('--n_eps', default=10000, type=int, help='N_episodes')
-    parser.add_argument('--T', default=25, type=int, help='maximum timesteps per episode')
+    parser.add_argument('--T', default=100000, type=int, help='maximum timesteps per episode')
     parser.add_argument("--render", action="store_true", help="Render the environment mode")
     parser.add_argument("--use_writer", action="store_true", help="Render the environment mode")
     parser.add_argument("--use_ounoise", action="store_true", help="Use OUNoise")
@@ -28,20 +29,21 @@ def get_args():
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
 
+def reset_env(env, nagents):
+    obs = env.reset()
+    return [np.copy(obs) for _ in range(nagents)]
+
 def learn_episodic_MADDPG(args, env=None):
 
-    args.env = "simple_speaker_listener"
-    # args.discrete_action = True
-    if env is None:
-        env = make_multiagent_env(args.env)
-    
-    # print(act_sp)
+    env = gym.make("BipedalWalker-v2")
+    # print(act_spk)
     if not args.use_writer:
         print("not using writer")
-    n_agents = len(env.agents)
+    n_agents = 4
+    env.action_space = [Box(-1, 1, [1]) for _ in range(n_agents)]
     # action_spaces = [act_sp.n for act_sp in env.action_space]
-    observation_spaces = [ob_sp.shape[0] for ob_sp in env.observation_space]
-    log_dir = "maddpg_test_run"
+    observation_spaces = [24 for _ in range(n_agents)]
+    log_dir = "bipedal_logging"
     writer = SummaryWriter(log_dir) if args.use_writer else None
     running_rewards = deque([], maxlen=args.lograte)
     # discrete actions maddpg agentgent
@@ -66,7 +68,7 @@ def learn_episodic_MADDPG(args, env=None):
             print("Unable to load from specified checkpoint")
 
     for ep in range(start_ep, args.n_eps):
-        observations = env.reset()
+        observations = reset_env(env, n_agents)
         trainer.reset()
         done = False
         for t in range(args.T):
@@ -75,9 +77,10 @@ def learn_episodic_MADDPG(args, env=None):
             # TODO fix action to better
             actions = [a.detach().cpu().numpy() for a in actions]
             # print(actions)
-            next_obs, rewards, dones, _ = env.step(actions)
-            print(rewards)
-            print(type(rewards[0]))
+            next_ob, reward, done, _ = env.step(actions)
+            next_obs = [np.copy(next_ob) for _ in range(n_agents)]
+            rewards = [np.float(reward) for _ in range(n_agents)]
+            dones = [done for _ in range(n_agents)]
             trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
             done = all(dones) or t >= args.T
             if timesteps % args.train_freq == 0:

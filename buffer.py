@@ -77,7 +77,8 @@ class ReplayBuffer(object):
                 rewards[agent_i].append(reward[agent_i])
                 obses_tp1[agent_i].append(obs_tp1[agent_i])
                 dones[agent_i].append(done[agent_i])
-
+        # print(rewards[0])
+        # import ipdb; ipdb.set_trace()
         return [torch.stack(obses_t[i]).to(self.device).float() for i in range(self.n_agents)], \
             [torch.stack(actions[i]).to(self.device).float() for i in range(self.n_agents)], \
             [torch.stack(rewards[i]).to(self.device).float() for i in range(self.n_agents)], \
