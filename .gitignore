@@ -7,3 +7,8 @@ prototypes/__pycache__/utils.cpython-37.pyc
 *.DS_Store
 */pytorch
 *.tar
+baselines/
+data/
+maddpg-pytorch/
+maddpg/
+train_ddpg_bipedal.py
