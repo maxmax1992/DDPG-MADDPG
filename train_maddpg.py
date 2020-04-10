@@ -76,8 +76,8 @@ def learn_episodic_MADDPG(args, env=None):
             actions = [a.detach().cpu().numpy() for a in actions]
             # print(actions)
             next_obs, rewards, dones, _ = env.step(actions)
-            print(rewards)
-            print(type(rewards[0]))
+            # print(rewards)
+            # print(type(rewards[0]))
             trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
             done = all(dones) or t >= args.T
             if timesteps % args.train_freq == 0:
