@@ -21,7 +21,7 @@ BATCH_SIZE = 64
 
 class DDPG_agent:
 
-    def __init__(self, act_sp, ob_sp, all_obs, all_acts, continuous_action, hidden_dim=64, act_boundaries=(0, 1)):
+    def __init__(self, act_sp, ob_sp, continuous_action, hidden_dim=64, act_boundaries=(0, 1)):
         self.ob_sp = ob_sp
         self.continuous_action = continuous_action
         if self.continuous_action:
@@ -29,19 +29,13 @@ class DDPG_agent:
         self.act_boundaries = act_boundaries
         self.policy = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
         self.policy_targ = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
-        self.qnet = MLPNetwork(all_obs + all_acts, 1, constrain_out=False, hidden_dim=hidden_dim).to(device)
-        self.qnet_targ = MLPNetwork(all_obs + all_acts, 1, constrain_out=False, hidden_dim=hidden_dim).to(device)
 
         self.policy.to(device)
-        self.qnet.to(device)
         self.policy_targ.to(device)
-        self.qnet_targ.to(device)
 
         hard_update(self.policy_targ, self.policy)
-        hard_update(self.qnet_targ, self.qnet)
 
         self.p_optimizer = optim.Adam(self.policy.parameters(), lr=LR)
-        self.q_optimizer = optim.Adam(self.qnet.parameters(), lr=LR)
 
     def select_greedy_from_target(self, states, use_target=True):
         policy = self.policy_targ if use_target else self.policy
@@ -83,7 +77,16 @@ class MADDPG_Trainer:
         self.n_agents = n_agents
         self.ob_spcs = ob_spcs
         self.act_spcs = [1 if isinstance(act_spcs[i], Box) else act_spcs[i].n for i in range(n_agents)]
-        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], np.sum(self.ob_spcs), np.sum(self.act_spcs),
+        self.qnet = MLPNetwork(np.sum(self.ob_spcs), np.sum(self.act_spcs), 1, constrain_out=False).to(device)
+        self.qnet_targ = MLPNetwork(np.sum(self.ob_spcs), np.sum(self.act_spcs), 1, constrain_out=False).to(device)
+
+        self.qnet.to(device)
+        self.qnet_targ.to(device)
+
+        hard_update(self.qnet_targ, self.qnet)
+
+        self.q_optimizer = optim.Adam(self.qnet.parameters(), lr=LR)
+        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i],
                        isinstance(act_spcs[i], Box)) for i in range(n_agents)]
         self.n_steps = 0
         self.n_updates = 0
@@ -153,7 +156,6 @@ class MADDPG_Trainer:
         states_all = torch.cat(states_i, 1)
         next_states_all = torch.cat(next_states_i, 1)
         actions_all = torch.cat(actions_i, 1)
-        
         for i, agent in enumerate(self.agents):
             next_actions_all = [ag.select_greedy_from_target(next_state)
                                 for ag, next_state in zip(self.agents, next_states_i)]
@@ -174,7 +176,6 @@ class MADDPG_Trainer:
             self.agents[i].q_optimizer.step()
             actor_loss = 0
             # ACTOR gradient ascent of Q(s, π(s | ø)) with respect to ø
-        
             # use gumbel softmax max temp trick
             policy_out = self.agents[i].policy(states_i[i])
             if not self.agents[i].continuous_action:
@@ -191,7 +192,6 @@ class MADDPG_Trainer:
 
             actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
                                                torch.cat(actions_curr_pols, 1)], 1)).mean()
-                                               
             if not self.agents[i].continuous_action:
                 actor_loss += (policy_out**2).mean() * 1e-3
 
@@ -208,6 +208,5 @@ class MADDPG_Trainer:
                     "vf_loss": loss,
                     "actor_loss": actor_loss
                 }, self.n_updates)
-        
         self.update_all_targets()
         self.n_updates += 1
