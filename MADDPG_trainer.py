@@ -127,10 +127,12 @@ class MADDPG_Trainer:
 
     def prep_training(self):
         for agent in self.agents:
-            agent.qnet.train()
+            # agent.qnet.train()
             agent.policy.train()
-            agent.qnet_targ.train()
+            # agent.qnet_targ.train()
             agent.policy_targ.train()
+        self.qnet.train()
+        self.qnet_targ.train()
 
     def get_save_data(self):
         # TODO
@@ -142,38 +144,61 @@ class MADDPG_Trainer:
 
     def eval(self):
         for agent in self.agents:
-            agent.qnet.eval()
+            # agent.qnet.eval()
             agent.policy.eval()
-            agent.qnet_targ.eval()
+            # agent.qnet_targ.eval()
             agent.policy_targ.eval()
+        self.qnet.eval()
+        self.qnet_targ.eval()
 
     def sample_and_train(self, batch_size):
         # TODO ADD Model saving, optimize code
         batch = self.memory.sample(min(batch_size, len(self.memory)))
 
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
-
         states_all = torch.cat(states_i, 1)
         next_states_all = torch.cat(next_states_i, 1)
         actions_all = torch.cat(actions_i, 1)
+        
+        next_actions_all = [ag.select_greedy_from_target(next_state)
+                            for ag, next_state in zip(self.agents, next_states_i)]
+        # computing target
+        total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
+        # target_q = self.agents[i].qnet_targ(total_obs).detach()
+        all_target_q = self.qnet_targ(total_obs).detach()
+        all_input_q = self.qnet(torch.cat([states_all, actions_all], 1))
+
+        # ToDO START
+        i = 0 
+        policy_out = self.agents[i].policy(states_i[i])
+        if not self.agents[i].continuous_action:
+            acts_agent = gumbel_softmax(policy_out, hard=True)
+        else:
+            acts_agent = policy_out
+
+        actions_curr_pols = [agent_.select_greedy_from_target(state, use_target=False)
+                             for agent_, state in zip(self.agents, states_i)]
+        # TODO  end
+        # for action_batch in actions_curr_pols:
+        #     action_batch.detach_()
+        actions_curr_pols[i] = acts_agent
+        import ipdb; ipdb.set_trace()
+
         for i, agent in enumerate(self.agents):
-            next_actions_all = [ag.select_greedy_from_target(next_state)
-                                for ag, next_state in zip(self.agents, next_states_i)]
-            # computing target
-            total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
-            target_q = self.agents[i].qnet_targ(total_obs).detach()
+            target_q = all_target_q[i]
             rewards = rewards_i[i].view(-1, 1)
             dones = dones_i[i].view(-1, 1)
             target_q = rewards + (1 - dones) * GAMMA * target_q
 
             # computing the inputs
-            input_q = self.agents[i].qnet(torch.cat([states_all, actions_all], 1))
+            # input_q = self.agents[i].qnet(torch.cat([states_all, actions_all], 1))
+            input_q = all_input_q[i] 
             self.agents[i].q_optimizer.zero_grad()
             loss = self.criterion(input_q, target_q.detach())
             # print("LOSS", loss)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.agents[i].qnet.parameters(), 0.5)
-            self.agents[i].q_optimizer.step()
+            # torch.nn.utils.clip_grad_norm_(self.agents[i].qnet.parameters(), 0.5)
+            # self.agents[i].q_optimizer.step()
             actor_loss = 0
             # ACTOR gradient ascent of Q(s, π(s | ø)) with respect to ø
             # use gumbel softmax max temp trick
@@ -208,5 +233,8 @@ class MADDPG_Trainer:
                     "vf_loss": loss,
                     "actor_loss": actor_loss
                 }, self.n_updates)
+
+        torch.nn.utils.clip_grad_norm_(self.qnet.parameters(), 0.5)
+        self.q_optimizer.step()
         self.update_all_targets()
         self.n_updates += 1
