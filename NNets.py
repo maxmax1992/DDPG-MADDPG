@@ -1,5 +1,7 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 class MLPNetwork(nn.Module):
     """
@@ -44,3 +46,39 @@ class MLPNetwork(nn.Module):
         h2 = self.nonlin(self.fc2(h1))
         out = self.out_fn(self.fc3(h2))
         return out
+
+
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+
+class Policy_net(nn.Module):
+
+    def __init__(self, ob_sp, act_sp):
+        super(Policy_net, self).__init__()
+        self.affine1 = nn.Linear(ob_sp, 60)
+        self.affine2 = nn.Linear(60, 60)
+        self.mean_head = nn.Linear(60, act_sp)
+
+    def forward(self, x):
+        x = x.to(device).float()
+        x = F.relu(self.affine1(x))
+        x = F.relu(self.affine2(x))
+        mean = 2 * torch.tanh(self.mean_head(x))
+        return mean
+
+
+class Q_net(nn.Module):
+    def __init__(self, ob_sp, act_sp):
+        super(Q_net, self).__init__()
+        self.act_sp = act_sp
+        self.ob_sp = ob_sp
+        self.affine1 = nn.Linear(self.ob_sp, 60)
+        self.affine2 = nn.Linear(60 + self.act_sp, 60)
+        self.value_head = nn.Linear(60, 1)
+
+    def forward(self, x_, action_):
+        x, action = x_.to(device).float(), action_.to(device).float()
+        x = F.relu(self.affine1(x))
+        x = torch.cat([x, action], 1)
+        x = F.relu(self.affine2(x))
+        return self.value_head(x)
