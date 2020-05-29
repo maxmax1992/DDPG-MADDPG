@@ -1,8 +1,10 @@
 # import sys
 # sys.path.append('.')
+import os
 import gym
 import numpy as np
 import argparse
+import shutil
 from collections import deque
 from DDPG_agent import DDPG_Agent
 from torch.utils.tensorboard import SummaryWriter
@@ -14,18 +16,30 @@ def get_args():
     parser.add_argument('--n_eps', default=400, type=int, help='N_episodes')
     parser.add_argument('--T', default=300, type=int, help='maximum timesteps per episode')
     parser.add_argument("--render", action="store_true", help="Render the environment mode")
-    parser.add_argument("--use_writer", action="store_true", help="Render the environment mode")
+    parser.add_argument("--use_writer", default=True, type=bool, help="Use the writer or no")
     parser.add_argument("--use_ounoise", action="store_true", help="Use OUNoise")
     parser.add_argument("--lograte", default=100, type=int, help="Log frequency")
     parser.add_argument("--discrete_action", default=False, type=bool, help="Use discrete action outputs")
+    parser.add_argument('--logdir', default="logs", type=str, help='dir where tensorboard logs exist')
+    parser.add_argument('--exp_name', default="Pendulum-v0-base", type=str, help='Experiment name')
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
 
 
 def learn_episodic_DDPG(args):
-    ###
     # args.env = "CartPole-v0"
     # args.discrete_action = True
+
+    # check if same test name exist, then we override the run
+    dir_ = os.path.join(args.logdir, args.exp_name)
+    if args.exp_name != "":
+        if os.path.isdir(dir_):
+            shutil.rmtree(dir_)
+            print("removing tree")
+
+    if not args.use_writer:
+        print("not using writer")
+    writer = SummaryWriter(dir_) if args.use_writer else None
 
     env = gym.make(args.env)
     ob_sp = env.observation_space.shape[0]
@@ -35,9 +49,6 @@ def learn_episodic_DDPG(args):
     else:
         act_sp = env.action_space.shape[0]
     # print(act_sp)
-    if not args.use_writer:
-        print("not using writer")
-    writer = SummaryWriter() if args.use_writer else None
     running_rewards = deque([], maxlen=args.lograte)
     agent = DDPG_Agent(ob_sp, act_sp, -2, 2, writer, args)
     for ep in range(args.n_eps):
@@ -63,7 +74,8 @@ def learn_episodic_DDPG(args):
         if (ep + 1) % args.lograte == 0:
             print(f"episode: {ep}, running episode rewards: {np.mean(running_rewards)}")
         # TODO ADD logging to the
-        
+        #
+    writer.close() 
     return 0
 
 
