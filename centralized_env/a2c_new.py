@@ -1,12 +1,33 @@
 # import sys
 # sys.path.append('.')
-import time
 import numpy as np
 import argparse
 from collections import deque
-from MADDPG_trainer import MADDPG_Trainer
 from torch.utils.tensorboard import SummaryWriter
-from utils import make_multiagent_env, map_to_tensors
+from utils import make_multiagent_env
+
+
+class a2cTrainer():
+
+    def __init__(self, n_agents, action_spaces, observation_spaces, writer, args):
+        
+        pass
+
+    def eval(self):
+        pass
+
+    def prep_train(self):
+        pass
+
+    def sample_and_train(self):
+        pass
+
+    def reset(self):
+        pass
+
+
+
+
 
 
 def get_args():
@@ -14,16 +35,14 @@ def get_args():
     parser.add_argument('--env', default="simple", type=str, help='gym environment name')
     parser.add_argument('--n_eps', default=10000, type=int, help='N_episodes')
     parser.add_argument('--T', default=25, type=int, help='maximum timesteps per episode')
-    parser.add_argument("--render_freq", default=0, type=int, help="Render frequency, if=0 no rendering")
-    parser.add_argument("--use_writer", action="store_true", help="Use writer or no")
+    parser.add_argument("--render", action="store_true", help="Render the environment mode")
+    parser.add_argument("--use_writer", action="store_true", help="Render the environment mode")
     parser.add_argument("--use_ounoise", action="store_true", help="Use OUNoise")
     parser.add_argument("--lograte", default=100, type=int, help="Log frequency")
     parser.add_argument("--train_freq", default=100, type=int, help="Training frequency")
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--batch_size", default=1024, type=int, help="Batch size for training")
-    
-    parser.add_argument("--algo", default="maddpg", type=str, help="What algo to use, maddpg or DDPG")
-    parser.add_argument("--all_obs", action="store_true", help="Use all observations for every agent")
+    parser.add_argument("--centralized_actor", default=false, type=bool, help="Use centralized actor for action selection")
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
 
@@ -59,7 +78,7 @@ def learn_episodic_MADDPG(args):
             actions = [a.cpu().numpy() for a in actions]
             # print(actions)
             next_obs, rewards, dones, _ = env.step(actions)
-            trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
+            # trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
             done = all(dones) or t >= args.T
             if timesteps % args.train_freq == 0:
                 trainer.prep_training()
@@ -67,8 +86,7 @@ def learn_episodic_MADDPG(args):
                 trainer.eval()
             observations = next_obs
 
-            if args.render_freq != 0 and ep % args.render_freq == 0:
-                # __import__('ipdb').set_trace()
+            if args.render:
                 env.render()
 
             episode_rewards[-1] += np.sum(rewards)
@@ -83,28 +101,8 @@ def learn_episodic_MADDPG(args):
         if (ep + 1) % args.lograte == 0:
             print(f"episode: {ep}, running episode rewards: {np.mean(running_rewards)}")
         # TODO ADD logging to the
-    eval_eps = 200
-    for i in range(eval_eps):
-        observations = env.reset()
-        trainer.reset()
-        done = False
-        for t in range(50):
-            timesteps += 1
-            actions = trainer.get_actions(observations)
-            actions = [a.cpu().numpy() for a in actions]
-            # print(actions)
-            next_obs, rewards, dones, _ = env.step(actions)
-            # trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
-            done = all(dones) or t >= args.T
-            observations = next_obs
-
-                # __import__('ipdb').set_trace()
-            time.sleep(0.2)
-            env.render()
-            if done:
-                break
-    # writer.export_scalars_to_json(str(log_dir / 'summary.json'))
-    # writer.close()
+    writer.export_scalars_to_json(str(log_dir / 'summary.json'))
+    writer.close()
         
     return 0
 
@@ -117,3 +115,4 @@ if __name__ == '__main__':
     # plt.plot(moving_average(rewards_DDPG, 100), label="DDPG")
     # plt.legend()
     # plt.show()
+

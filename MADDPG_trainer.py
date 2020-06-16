@@ -64,16 +64,22 @@ class MADDPG_Trainer:
         self.memory = ReplayBuffer(args.buffer_length, n_agents, device)
         self.epsilon_scheduler = LinearSchedule(E_GREEDY_STEPS, FINAL_STD, INITIAL_STD,
                                                 warmup_steps=WARMUP_STEPS)
+        self.use_maddpg = args.algo == "maddpg"
+        self.all_obs = args.all_obs
         self.n_agents = n_agents
         self.act_spcs = act_spcs
         self.ob_spcs = ob_spcs
-        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], np.sum(self.ob_spcs),
-                       np.sum(self.act_spcs)) for i in range(n_agents)]
-        
+        qnet_actspcs = [np.sum(self.act_spcs) if self.use_maddpg else self.act_spcs[i]
+                        for i in range(n_agents)]
+        qnet_obspcs = [np.sum(self.ob_spcs) if self.use_maddpg or self.all_obs else self.ob_spcs[i]
+                        for i in range(n_agents)]
+        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], qnet_obspcs[i],
+                       qnet_actspcs[i]) for i in range(n_agents)]
         self.n_steps = 0
         self.n_updates = 0
         self.writer = writer
         self.criterion = nn.MSELoss()
+
 
     def get_actions(self, states):
         return [agent.select_action(state)[0] for agent, state in zip(self.agents, states)]
@@ -124,16 +130,21 @@ class MADDPG_Trainer:
     def sample_and_train(self, batch_size):
         # TODO ADD Model saving, optimize code
         batch = self.memory.sample(min(batch_size, len(self.memory)))
-
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
-
-        states_all = torch.cat(states_i, 1)
-        next_states_all = torch.cat(next_states_i, 1)
-        actions_all = torch.cat(actions_i, 1)
-        
+        if self.use_maddpg:
+            states_all = torch.cat(states_i, 1)
+            next_states_all = torch.cat(next_states_i, 1)
+            actions_all = torch.cat(actions_i, 1)
         for i, agent in enumerate(self.agents):
-            next_actions_all = [onehot_from_logits(ag.policy_targ(next_state))
-                                for ag, next_state in zip(self.agents, next_states_i)]
+            if not self.use_maddpg:
+                states_all = states_i[i]
+                next_states_all = next_states_i[i]
+                actions_all = actions_i[i]
+            if self.use_maddpg:  
+                next_actions_all = [onehot_from_logits(ag.policy_targ(next_state))
+                                    for ag, next_state in zip(self.agents, next_states_i)]
+            else:
+                next_actions_all = [onehot_from_logits(agent.policy_targ(next_states_i[i]))]
             # computing target
             total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
             target_q = self.agents[i].qnet_targ(total_obs).detach()
@@ -150,21 +161,25 @@ class MADDPG_Trainer:
             torch.nn.utils.clip_grad_norm_(self.agents[i].qnet.parameters(), 0.5)
             self.agents[i].q_optimizer.step()
             actor_loss = 0
+            
             # ACTOR gradient ascent of Q(s, π(s | ø)) with respect to ø
         
             # use gumbel softmax max temp trick
             policy_out = self.agents[i].policy(states_i[i])
             gumbel_sample = gumbel_softmax(policy_out, hard=True)
+            if self.use_maddpg:
+                actions_curr_pols = [onehot_from_logits(agent_.policy(state))
+                                     for agent_, state in zip(self.agents, states_i)]
 
-            actions_curr_pols = [onehot_from_logits(agent_.policy(state))
-                                 for agent_, state in zip(self.agents, states_i)]
+                for action_batch in actions_curr_pols:
+                    action_batch.detach_()
+                actions_curr_pols[i] = gumbel_sample
 
-            for action_batch in actions_curr_pols:
-                action_batch.detach_()
-            actions_curr_pols[i] = gumbel_sample
-
-            actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
-                                               torch.cat(actions_curr_pols, 1)], 1)).mean()
+                actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
+                                                   torch.cat(actions_curr_pols, 1)], 1)).mean()
+            else:
+                actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
+                                                   gumbel_sample], 1)).mean()
             actor_loss += (policy_out**2).mean() * 1e-3
 
             self.agents[i].p_optimizer.zero_grad()
@@ -174,7 +189,7 @@ class MADDPG_Trainer:
             self.agents[i].p_optimizer.step()
             # detach the forward propagated action samples
             actions_i[i].detach_()
-
+            # __import__('ipdb').set_trace()
             if self.args.use_writer:
                 self.writer.add_scalars("Agent_%i" % i, {
                     "vf_loss": loss,
