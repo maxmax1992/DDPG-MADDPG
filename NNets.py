@@ -17,7 +17,6 @@ class MLPNetwork(nn.Module):
             nonlin (PyTorch function): Nonlinearity to apply to hidden layers
         """
         super(MLPNetwork, self).__init__()
-
         if norm_in:  # normalize inputs
             self.in_fn = nn.BatchNorm1d(input_dim)
             self.in_fn.weight.data.fill_(1)

@@ -27,6 +27,12 @@ def get_args():
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
 
+def prepro_observations(observations, all_obs=False):
+    if all_obs:
+        all_arr = np.concatenate(observations)
+        return [np.copy(all_arr) for i in range(len(observations))]
+    return observations
+
 
 def learn_episodic_MADDPG(args):
     ###
@@ -40,6 +46,9 @@ def learn_episodic_MADDPG(args):
     n_agents = len(env.agents)
     action_spaces = [act_sp.n for act_sp in env.action_space]
     observation_spaces = [ob_sp.shape[0] for ob_sp in env.observation_space]
+    if args.all_obs:
+        observation_spaces = [sum(observation_spaces) for i in range(n_agents)]
+    # __import__('ipdb').set_trace()
     log_dir = "maddpg_test_run"
     writer = SummaryWriter(log_dir) if args.use_writer else None
     running_rewards = deque([], maxlen=args.lograte)
@@ -55,11 +64,15 @@ def learn_episodic_MADDPG(args):
         done = False
         for t in range(args.T):
             timesteps += 1
+            # preprocess observations
+            observations = prepro_observations(observations, args.all_obs)
+            # get actions
             actions = trainer.get_actions(observations)
             actions = [a.cpu().numpy() for a in actions]
             # print(actions)
             next_obs, rewards, dones, _ = env.step(actions)
-            trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
+            next_obs_ = prepro_observations(next_obs, args.all_obs)
+            trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs_, dones))
             done = all(dones) or t >= args.T
             if timesteps % args.train_freq == 0:
                 trainer.prep_training()
@@ -92,13 +105,9 @@ def learn_episodic_MADDPG(args):
             timesteps += 1
             actions = trainer.get_actions(observations)
             actions = [a.cpu().numpy() for a in actions]
-            # print(actions)
             next_obs, rewards, dones, _ = env.step(actions)
-            # trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs, dones))
             done = all(dones) or t >= args.T
             observations = next_obs
-
-                # __import__('ipdb').set_trace()
             time.sleep(0.2)
             env.render()
             if done:

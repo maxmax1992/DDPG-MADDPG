@@ -25,6 +25,7 @@ class DDPG_agent:
         self.ob_sp = ob_sp
 
         self.policy = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
+        print(ob_sp)
         self.policy_targ = MLPNetwork(ob_sp, act_sp, constrain_out=True, hidden_dim=hidden_dim).to(device)
         self.qnet = MLPNetwork(all_obs + all_acts, 1, constrain_out=False, hidden_dim=hidden_dim).to(device)
         self.qnet_targ = MLPNetwork(all_obs + all_acts, 1, constrain_out=False, hidden_dim=hidden_dim).to(device)
@@ -48,6 +49,7 @@ class DDPG_agent:
         if is_target:
             action = self.policy_targ(st)
         else:
+            # __import__('ipdb').set_trace()
             action = self.policy(st)
         action_with_noise = gumbel_softmax(action, hard=True).detach()
         return action_with_noise
@@ -71,9 +73,9 @@ class MADDPG_Trainer:
         self.ob_spcs = ob_spcs
         qnet_actspcs = [np.sum(self.act_spcs) if self.use_maddpg else self.act_spcs[i]
                         for i in range(n_agents)]
-        qnet_obspcs = [np.sum(self.ob_spcs) if self.use_maddpg or self.all_obs else self.ob_spcs[i]
+        qnet_obspcs = [np.sum(self.ob_spcs) if self.use_maddpg else self.ob_spcs[i]
                         for i in range(n_agents)]
-        self.agents = [DDPG_agent(self.act_spcs[i], self.ob_spcs[i], qnet_obspcs[i],
+        self.agents = [DDPG_agent(self.act_spcs[i], qnet_obspcs[i], qnet_obspcs[i],
                        qnet_actspcs[i]) for i in range(n_agents)]
         self.n_steps = 0
         self.n_updates = 0
@@ -131,6 +133,7 @@ class MADDPG_Trainer:
         # TODO ADD Model saving, optimize code
         batch = self.memory.sample(min(batch_size, len(self.memory)))
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
+        # __import__('ipdb').set_trace()        
         if self.use_maddpg:
             states_all = torch.cat(states_i, 1)
             next_states_all = torch.cat(next_states_i, 1)
