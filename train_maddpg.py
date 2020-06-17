@@ -21,9 +21,11 @@ def get_args():
     parser.add_argument("--train_freq", default=100, type=int, help="Training frequency")
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--batch_size", default=1024, type=int, help="Batch size for training")
-    
+    parser.add_argument("--exp_name", default="maddpg test run", type=str, help="Experiment name")
     parser.add_argument("--algo", default="maddpg", type=str, help="What algo to use, maddpg or DDPG")
     parser.add_argument("--all_obs", action="store_true", help="Use all observations for every agent")
+    parser.add_argument("--single_q", action="store_true", help="Use single Q-value network")
+    parser.add_argument("--use_sac", action="store_true", help="Use soft actor-critic")
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
 
@@ -76,7 +78,11 @@ def learn_episodic_MADDPG(args):
             done = all(dones) or t >= args.T
             if timesteps % args.train_freq == 0:
                 trainer.prep_training()
-                trainer.sample_and_train(args.batch_size)
+                if args.use_sac:
+                    print("TRAINING SAC")
+                    trainer.sample_and_train_sac(args.batch_size)
+                else:
+                    trainer.sample_and_train(args.batch_size)
                 trainer.eval()
             observations = next_obs
 
