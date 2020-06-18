@@ -79,7 +79,7 @@ def learn_episodic_MADDPG(args):
             if timesteps % args.train_freq == 0:
                 trainer.prep_training()
                 if args.use_sac:
-                    print("TRAINING SAC")
+                    # print("TRAINING SAC")
                     trainer.sample_and_train_sac(args.batch_size)
                 else:
                     trainer.sample_and_train(args.batch_size)

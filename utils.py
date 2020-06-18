@@ -26,10 +26,11 @@ def onehot_from_logits(logits, eps=0.0, logprobs=False):
     argmax_acs = (logits == logits.max(1, keepdim=True)[0]).float()
     if eps == 0.0:
         if logprobs:
-            with torch.no_grad:
+            with torch.no_grad():
                 a = Categorical(logits=logits).probs
-                __import__('ipdb').set_trace()
                 values = torch.log(a[argmax_acs == 1])
+                # __import__('ipdb').set_trace()
+                # print("HERE!!!")
                 return argmax_acs, values
         else:
             return argmax_acs
@@ -57,7 +58,7 @@ def gumbel_softmax_sample(logits, temperature):
 
 
 # modified for PyTorch from https://github.com/ericjang/gumbel-softmax/blob/master/Categorical%20VAE.ipynb
-def gumbel_softmax(logits, temperature=1.0, hard=False):
+def gumbel_softmax(logits, temperature=1.0, hard=False, logprobs=False):
     """Sample from the Gumbel-Softmax distribution and optionally discretize.
     Args:
       logits: [batch_size, n_class] unnormalized log-probs
@@ -72,6 +73,10 @@ def gumbel_softmax(logits, temperature=1.0, hard=False):
     if hard:
         y_hard = onehot_from_logits(y)
         y = (y_hard - y).detach() + y
+        if logprobs:
+            a = Categorical(logits=logits).probs
+            values = torch.log(a[y == 1])
+            return y, values
     return y
 
 class OUNoise:
