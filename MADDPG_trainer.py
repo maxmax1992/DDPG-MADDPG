@@ -5,6 +5,11 @@ import numpy as np
 from NNets import MLPNetwork
 from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax, onehot_from_logits
 from buffer import ReplayBuffer
+import seaborn as sns
+import matplotlib.pyplot as plt
+sns.set(color_codes=True)
+
+
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -14,10 +19,9 @@ LR = 1e-2
 TAU = 1e-2
 WARMUP_STEPS = 10000
 E_GREEDY_STEPS = 30000
-INITIAL_STD = 2.0
-FINAL_STD = 0.1
+# INITIAL_STD = 2.0
+# FINAL_STD = 0.1
 BATCH_SIZE = 64
-ALPHA = 0.01
 
 class SAC_agent:
 
@@ -44,7 +48,7 @@ class SAC_agent:
         self.policy.to(device)
         self.p_optimizer = optim.Adam(self.policy.parameters(), lr=LR)
         self.action_count = 0
-        self.use_warmup = False
+        self.use_warmup = True
 
     def select_action(self, state, temperature=None, is_tensor=False, is_target=False):
         if self.use_warmup and self.action_count < WARMUP_STEPS:
@@ -164,9 +168,23 @@ class MADDPG_Trainer:
         self.n_updates = 0
         self.writer = writer
         self.criterion = nn.MSELoss()
+        self.sac_alpha = args.sac_alpha
+        self.agent_actions = [[] for i in range(self.n_agents)]
+
+    def plot_actions(self):
+        for i in range(self.n_agents):
+            sns.distplot(self.agent_actions[i], bins=self.agents[i].act_sp, kde=False)
+            # __import__('ipdb').set_trace()
+            plt.show()
 
     def get_actions(self, states):
-        return [agent.select_action(state)[0] for agent, state in zip(self.agents, states)]
+        result = []
+        for i, (agent, state) in enumerate(zip(self.agents, states)):
+            action = agent.select_action(state)[0]
+            result.append(action)
+            if self.args.use_writer: self.agent_actions[i].append(np.argmax(action).item())
+        self.n_steps += 1
+        return result
 
     def store_transitions(self, states, actions, rewards, next_states, dones):
         self.memory.add(states, actions, rewards, next_states, dones)
@@ -223,10 +241,14 @@ class MADDPG_Trainer:
                                     for ag, next_state in zip(self.agents, next_states_i)]
 
                 next_actions_all = [e[0] for e in actions_and_logits]
-                next_logits_all = [ALPHA*e[1] for e in actions_and_logits]
+                next_logits_all = [self.sac_alpha*e[1] for e in actions_and_logits]
                 # __import__('ipdb').set_trace()
             else:
-                next_actions_all = [onehot_from_logits(agent.policy(next_states_i[i]))]
+                actions_and_logits = [onehot_from_logits(agent.policy(next_states_i[i]),
+                                                       logprobs=True)]
+                next_actions_all = [e[0] for e in actions_and_logits]
+                next_logits_all = [self.sac_alpha*e[1] for e in actions_and_logits]
+                
             # computing target
             total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
             
@@ -237,8 +259,12 @@ class MADDPG_Trainer:
             rewards = rewards_i[i].view(-1, 1)
             dones = dones_i[i].view(-1, 1)
             qnet_mins = torch.min(qnet_targs[0], qnet_targs[1])
-            logits_agent = next_logits_all[i]
-            target_q = rewards + (1 - dones) * GAMMA * (qnet_mins - 
+            # __import__('ipdb').set_trace()
+            logits_idx = i if self.use_maddpg else 0
+            logits_agent = next_logits_all[logits_idx]
+            # if len(qnet_mins.squeeze(-1)) != len(logits_agent.squeeze(-1)):
+            #     __import__('ipdb').set_trace()
+            target_q = rewards + (1 - dones) * GAMMA * (qnet_mins -
                                      logits_agent.reshape(qnet_mins.shape))
             # __import__('ipdb').set_trace()
             # computing the inputs
@@ -259,7 +285,7 @@ class MADDPG_Trainer:
             # use gumbel softmax max temp trick
             policy_out = self.agents[i].policy(states_i[i])
             gumbel_sample, act_logprobs = gumbel_softmax(policy_out, hard=True, logprobs=True)
-            act_logprobs = ALPHA*act_logprobs
+            act_logprobs = self.sac_alpha*act_logprobs
             # __import__('ipdb').set_trace() 
             if self.use_maddpg:
                 with torch.no_grad():
@@ -274,14 +300,22 @@ class MADDPG_Trainer:
                 actor_loss = - qnet_mins.mean()
                 # __import__('ipdb').set_trace()
             else:
-                actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
-                                                   gumbel_sample], 1)).mean()
+                # actor_loss = - self.agents[i].qnet(torch.cat([states_all.detach(),
+                #                                    gumbel_sample], 1)).mean()
+                # actions_curr_pols[i] = gumbel_sample
+                # __import__('ipdb').set_trace()
+                total_obs = torch.cat([states_all, gumbel_sample], 1)
+                qnet_outs = []
+                for qnet in self.agents[i].qnets:
+                    qnet_outs.append(qnet(total_obs))
+                qnet_mins = torch.min(qnet_outs[0], qnet_outs[1])
+                actor_loss = - qnet_mins.mean()
             # actor_loss += (policy_out**2).mean() * 1e-3
 
             self.agents[i].p_optimizer.zero_grad()
             actor_loss.backward()
             # nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
-            torch.nn.utils.clip_grad_norm_(self.agents[i].policy.parameters(), 0.5)
+            # torch.nn.utils.clip_grad_norm_(self.agents[i].policy.parameters(), 0.5)
             self.agents[i].p_optimizer.step()
             # detach the forward propagated action samples
             actions_i[i].detach_()

@@ -26,6 +26,7 @@ def get_args():
     parser.add_argument("--all_obs", action="store_true", help="Use all observations for every agent")
     parser.add_argument("--single_q", action="store_true", help="Use single Q-value network")
     parser.add_argument("--use_sac", action="store_true", help="Use soft actor-critic")
+    parser.add_argument("--sac_alpha", default=0.01, type=float, help="What alpha hyperparameter to use")
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
 
@@ -41,7 +42,8 @@ def learn_episodic_MADDPG(args):
     args.env = "simple_speaker_listener"
     # args.discrete_action = True
     env = make_multiagent_env(args.env)
-
+    print(args.exp_name)
+    print(args.sac_alpha)
     # print(act_sp)
     if not args.use_writer:
         print("not using writer")
@@ -51,7 +53,7 @@ def learn_episodic_MADDPG(args):
     if args.all_obs:
         observation_spaces = [sum(observation_spaces) for i in range(n_agents)]
     # __import__('ipdb').set_trace()
-    log_dir = "maddpg_test_run"
+    log_dir = "./logs/" + args.exp_name
     writer = SummaryWriter(log_dir) if args.use_writer else None
     running_rewards = deque([], maxlen=args.lograte)
     # discrete actions maddpg agentgent
@@ -73,6 +75,8 @@ def learn_episodic_MADDPG(args):
             actions = [a.cpu().numpy() for a in actions]
             # print(actions)
             next_obs, rewards, dones, _ = env.step(actions)
+            # __import__('ipdb').set_trace()
+            # rewards = [rew**2 for rew in rewards]
             next_obs_ = prepro_observations(next_obs, args.all_obs)
             trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs_, dones))
             done = all(dones) or t >= args.T
@@ -89,37 +93,39 @@ def learn_episodic_MADDPG(args):
             if args.render_freq != 0 and ep % args.render_freq == 0:
                 # __import__('ipdb').set_trace()
                 env.render()
-
             episode_rewards[-1] += np.sum(rewards)
 
             if done:
                 break
 
+        running_reward = episode_rewards[-1] / n_agents
         if args.use_writer:
-            writer.add_scalar('rewards', episode_rewards[-1] / n_agents, ep)
-        running_rewards.append(episode_rewards[-1] / n_agents)
+            writer.add_scalar('ep_reward', running_reward, ep)
+        running_rewards.append(running_reward)
         episode_rewards.append(0)
         if (ep + 1) % args.lograte == 0:
             print(f"episode: {ep}, running episode rewards: {np.mean(running_rewards)}")
         # TODO ADD logging to the
-    eval_eps = 200
-    for i in range(eval_eps):
-        observations = env.reset()
-        trainer.reset()
-        done = False
-        for t in range(50):
-            timesteps += 1
-            actions = trainer.get_actions(observations)
-            actions = [a.cpu().numpy() for a in actions]
-            next_obs, rewards, dones, _ = env.step(actions)
-            done = all(dones) or t >= args.T
-            observations = next_obs
-            time.sleep(0.2)
-            env.render()
-            if done:
-                break
-    # writer.export_scalars_to_json(str(log_dir / 'summary.json'))
-    # writer.close()
+    # if args.use_writer: trainer.plot_actions()
+    # eval_eps = 200
+    # for i in range(eval_eps):
+    #     observations = env.reset()
+    #     trainer.reset()
+    #     done = False
+    #     for t in range(50):
+    #         timesteps += 1
+    #         actions = trainer.get_actions(observations)
+    #         actions = [a.cpu().numpy() for a in actions]
+    #         next_obs, rewards, dones, _ = env.step(actions)
+    #         done = all(dones) or t >= args.T
+    #         observations = next_obs
+    #         time.sleep(0.2)
+    #         env.render()
+    #         if done:
+    #             break
+    # if args.use_writer:
+    #     writer.export_scalars_to_json(str(log_dir / 'summary.json'))
+    #     writer.close()
         
     return 0
 
@@ -128,6 +134,16 @@ if __name__ == '__main__':
     N_EPS = 10000
     args = get_args()
     # rewards_DQN_dueling = learn_episodic_DQN(N_EPS, 500, use_dueling=True)
+    alphas = [0.8, 0.6, 0.4, 0.2, 0.15, 0.1, 0.05, 0.01, 0.001]
+    exp_name_base = "sac_alpha"
+    # for alpha in alphas:
+    #     # alpha = 0.6
+    #     print("starting with alpha" + str(alpha))
+    #     args.exp_name = exp_name_base + str(alpha)
+    #     alpha = 0.6
+    #     args.sac_alpha = alpha
+    #     # args.sac_alpha = alpha
+            
     rewards_DDPG = learn_episodic_MADDPG(args)
     # plt.plot(moving_average(rewards_DDPG, 100), label="DDPG")
     # plt.legend()
