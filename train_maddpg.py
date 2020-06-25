@@ -27,6 +27,7 @@ def get_args():
     parser.add_argument("--single_q", action="store_true", help="Use single Q-value network")
     parser.add_argument("--use_sac", action="store_true", help="Use soft actor-critic")
     parser.add_argument("--sac_alpha", default=0.01, type=float, help="What alpha hyperparameter to use")
+    parser.add_argument("--use_td3", action="store_true", help="use  TD3 algorithm")
     # parser.add_argument("--render", default=, help="Render the environment mode")
     return parser.parse_args()
 
@@ -85,11 +86,12 @@ def learn_episodic_MADDPG(args):
                 if args.use_sac:
                     # print("TRAINING SAC")
                     trainer.sample_and_train_sac(args.batch_size)
-                else:
+                elif not args.use_td3:
                     trainer.sample_and_train(args.batch_size)
                 trainer.eval()
             observations = next_obs
-
+            if args.use_td3 and ep > 1:
+                trainer.sample_and_train_td3(args.batch_size)
             if args.render_freq != 0 and ep % args.render_freq == 0:
                 # __import__('ipdb').set_trace()
                 env.render()

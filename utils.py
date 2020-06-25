@@ -69,6 +69,7 @@ def gumbel_softmax(logits, temperature=1.0, hard=False, logprobs=False):
       If hard=True, then the returned sample will be one-hot, otherwise it will
       be a probabilitiy distribution that sums to 1 across classes
     """
+    # __import__('ipdb').set_trace()
     y = gumbel_softmax_sample(logits, temperature)
     if hard:
         y_hard = onehot_from_logits(y)
