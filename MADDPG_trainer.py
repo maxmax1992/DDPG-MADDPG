@@ -28,7 +28,7 @@ class TD3_agent:
 
     def __init__(self, act_sp, ob_sp, all_obs, all_acts, hidden_dim=64, 
                  start_steps=10000, update_after=1000, update_every=50):
-        self.lr = 1e-4
+        self.lr = 1e-2
         self.act_sp = act_sp
         self.ob_sp = ob_sp
         self.start_steps = start_steps
@@ -328,8 +328,8 @@ class MADDPG_Trainer:
         tensor[indices_to_edit] = self.agents[ag_i].random_action().view(tensor[0].shape)
 
 
-    def train_td3(self, batch_size, timer):
-
+    def train_td3(self, batch_size):
+        self.n_updates += 1
         batch = self.memory.sample(min(batch_size, len(self.memory)))
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
         # __import__('ipdb').set_trace()
@@ -391,7 +391,7 @@ class MADDPG_Trainer:
 
         if self.args.use_writer:
             self.writer.add_scalar(f"Agent_{i}: q_net_loss: ", np.mean(losses), self.n_updates)
-        if timer % 2 == 0:
+        if self.n_updates % 2 == 0:
             for i in range(self.n_agents):
                 # print("training policy")
                 actor_loss = 0
@@ -432,7 +432,7 @@ class MADDPG_Trainer:
                 if self.args.use_writer:
                     self.writer.add_scalar(f"Agent_{i}: policy_objective: ", actor_loss.item(), self.n_updates)
                 self.update_all_targets()
-        self.n_updates += 1
+        # self.n_updates += 1
 
     def sample_and_train_sac(self, batch_size):
         # TODO ADD Model saving, optimize code

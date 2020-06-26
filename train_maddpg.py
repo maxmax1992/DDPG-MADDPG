@@ -88,10 +88,12 @@ def learn_episodic_MADDPG(args):
                     trainer.sample_and_train_sac(args.batch_size)
                 elif not args.use_td3:
                     trainer.sample_and_train(args.batch_size)
+                elif args.use_td3:
+                    trainer.train_td3(args.batch_size)
                 trainer.eval()
             observations = next_obs
-            if args.use_td3 and ep > 1:
-                trainer.sample_and_train_td3(args.batch_size)
+            # if args.use_td3 and ep > 1:
+            #     trainer.sample_and_train_td3(args.batch_size)
             if args.render_freq != 0 and ep % args.render_freq == 0:
                 # __import__('ipdb').set_trace()
                 env.render()
