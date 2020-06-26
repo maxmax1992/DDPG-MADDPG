@@ -11,10 +11,10 @@ sns.set(color_codes=True)
 
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-
+print(device)
 MEMORY_SIZE = int(1e6)
 GAMMA = 0.95
-LR = 1e-4
+LR = 1e-2
 TAU = 1e-2
 WARMUP_STEPS = 10000
 E_GREEDY_STEPS = 30000
@@ -28,6 +28,7 @@ class TD3_agent:
 
     def __init__(self, act_sp, ob_sp, all_obs, all_acts, hidden_dim=64, 
                  start_steps=10000, update_after=1000, update_every=50):
+        self.lr = 1e-4
         self.act_sp = act_sp
         self.ob_sp = ob_sp
         self.start_steps = start_steps
@@ -53,19 +54,19 @@ class TD3_agent:
             hard_update(qnet_targ, qnet)
             self.qnets.append(qnet)
             self.qnet_targs.append(qnet_targ)
-            self.q_optimizers.append(optim.Adam(qnet.parameters(), lr=LR))
+            self.q_optimizers.append(optim.Adam(qnet.parameters(), lr=self.lr))
 
         self.policy.to(device)
-        self.p_optimizer = optim.Adam(self.policy.parameters(), lr=LR)
+        self.p_optimizer = optim.Adam(self.policy.parameters(), lr=self.lr)
 
         self.policy_targ.to(device)
-        self.p_targ_optimizer = optim.Adam(self.policy_targ.parameters(), lr=LR)
+        self.p_targ_optimizer = optim.Adam(self.policy_targ.parameters(), lr=self.lr)
 
         self.action_count = 0
         self.use_warmup = True
 
     def random_action(self):
-        action = torch.zeros((1, self.act_sp))
+        action = torch.zeros((1, self.act_sp)).to(device)
         action[0, np.random.randint(0, self.act_sp)] = 1.0
         return action
 
@@ -270,7 +271,7 @@ class MADDPG_Trainer:
         for i, (agent, state) in enumerate(zip(self.agents, states)):
             action = agent.select_action(state)[0]
             result.append(action)
-            if self.args.use_writer: self.agent_actions[i].append(np.argmax(action).item())
+            if self.args.use_writer: self.agent_actions[i].append(np.argmax(action.cpu()).item())
         self.n_steps += 1
         return result
 
