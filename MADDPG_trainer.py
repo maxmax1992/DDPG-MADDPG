@@ -7,9 +7,10 @@ from utils import soft_update, hard_update, LinearSchedule, gumbel_softmax, oneh
 from buffer import ReplayBuffer
 import seaborn as sns
 import matplotlib.pyplot as plt
+import sys
+import functools
+
 sns.set(color_codes=True)
-
-
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(device)
 MEMORY_SIZE = int(1e6)
@@ -29,6 +30,9 @@ class TD3_agent:
     def __init__(self, act_sp, ob_sp, all_obs, all_acts, hidden_dim=64, 
                  start_steps=10000, update_after=1000, update_every=50):
         self.lr = 1e-2
+        self.target_noise = 0.2
+        self.target_noise_clip = 0.3
+        self.act_noise = 0.1
         self.act_sp = act_sp
         self.ob_sp = ob_sp
         self.start_steps = start_steps
@@ -39,9 +43,11 @@ class TD3_agent:
         # self.update_every = 2
         print(f"act_sp: {act_sp}, ob_sp: {ob_sp}, all_obs: {all_obs}, all_acts: {all_acts}")
         self.policy = MLPNetwork(ob_sp, act_sp,
-                                constrain_out=True, hidden_dim=hidden_dim).to(device)
+                                constrain_out=True, discrete_action=False,
+                                td3_policy=True, hidden_dim=hidden_dim).to(device)
         self.policy_targ = MLPNetwork(ob_sp, act_sp,
-                                constrain_out=True, hidden_dim=hidden_dim).to(device)
+                                constrain_out=True, discrete_action=False,
+                                td3_policy=True, hidden_dim=hidden_dim).to(device)
         self.q_nets_n = 2
         self.qnets = []
         self.qnet_targs = []
@@ -76,6 +82,7 @@ class TD3_agent:
             # return random action:
             # self.action
             return self.random_action()
+        # print("select action")
         st = state
         if not is_tensor:
             st = torch.from_numpy(state).view(1, -1).float().to(device)
@@ -84,8 +91,12 @@ class TD3_agent:
             # action = self.policy_targ(st)
         else:
             # __import__('ipdb').set_trace()
+            
             # print("not target")
             action = self.policy(st)
+            noise = (self.act_noise**0.5)*torch.randn(action.shape)
+            # __import__('ipdb').set_trace()
+            action += noise
         action_with_noise = gumbel_softmax(action, hard=True).detach()
         # __import__('ipdb').set_trace()
         return action_with_noise
@@ -229,6 +240,7 @@ class MADDPG_Trainer:
     def __init__(self, n_agents, act_spcs, ob_spcs, writer, args):
         self.args = args
         self.memory = ReplayBuffer(args.buffer_length, n_agents, device)
+        # self.memory = ReplayMemory(args.buffer_length, n_agents, device)
         self.use_maddpg = args.algo == "maddpg"
         self.use_sac = args.use_sac
         self.use_td3 = args.use_td3
@@ -268,14 +280,18 @@ class MADDPG_Trainer:
 
     def get_actions(self, states):
         result = []
+        # with torch.no_grad():
         for i, (agent, state) in enumerate(zip(self.agents, states)):
             action = agent.select_action(state)[0]
             result.append(action)
-            if self.args.use_writer: self.agent_actions[i].append(np.argmax(action.cpu()).item())
+            # if self.args.use_writer: self.agent_actions[i].append(np.argmax(action.cpu()).item())
         self.n_steps += 1
         return result
 
+
     def store_transitions(self, states, actions, rewards, next_states, dones):
+        # print(sys.getsizeof(states) + sys.getsizeof(actions) + sys.getsizeof(rewards)
+        #       + sys.getsizeof(next_states) + sys.getsizeof(dones))
         self.memory.add(states, actions, rewards, next_states, dones)
 
     def reset(self):
@@ -320,13 +336,13 @@ class MADDPG_Trainer:
             for i in range(update_every):
                  self.train_td3(batch_size, i)
 
-    def batch_add_random_acts(self, tensor, prob, ag_i):
-        index_arr = np.arange(len(tensor))
-        indices_to_edit = index_arr[np.random.rand(*index_arr.shape) < prob]
+    def batch_add_random_acts(self, tensor, ag_i):
         # __import__('ipdb').set_trace()
-        # print(indices_to_edit)
-        tensor[indices_to_edit] = self.agents[ag_i].random_action().view(tensor[0].shape)
-
+        n_clip  =self.agents[ag_i].target_noise_clip
+        noise = (self.agents[ag_i].target_noise**0.5)*torch.randn(tensor.shape)
+        noise = torch.clamp(noise, -n_clip, n_clip)
+        tensor[:] = tensor[:] + noise
+        # __import__('ipdb').set_trace()
 
     def train_td3(self, batch_size):
         self.n_updates += 1
@@ -344,48 +360,30 @@ class MADDPG_Trainer:
                 next_states_all = next_states_i[i]
                 actions_all = actions_i[i]
             if self.use_maddpg:  
-                next_actions_all = [onehot_from_logits(ag.policy(next_state))
+                next_actions_all = [ag.policy(next_state)
                                     for ag, next_state in zip(self.agents, next_states_i)]
 
-                # next_actions_all = [e[0] for e in actions_and_logits]
-                [self.batch_add_random_acts(e, TD3_random_act_prob, i) for i, e in enumerate(next_actions_all)]
-                # __import__('ipdb').set_trace()
-                # next_logits_all = [self.sac_alpha*e[1] for e in actions_and_logits]
-                # __import__('ipdb').set_trace()
+                [self.batch_add_random_acts(e, i) for i, e in enumerate(next_actions_all)]
+                next_actions_all = [onehot_from_logits(e) for e in next_actions_all]
             else:
                 actions_and_logits = [onehot_from_logits(agent.policy(next_states_i[i]))]
                 next_actions_all = [e[0] for e in actions_and_logits]
-                # next_logits_all = [self.sac_alpha*e[1] for e in actions_and_logits]
-                
-            # computing target
             total_obs = torch.cat([next_states_all, torch.cat(next_actions_all, 1)], 1)
-            
-            # target_q = self.agents[i].qnet_targ(total_obs).detach()
             qnet_targs = []
             for qnet in self.agents[i].qnet_targs:
                 qnet_targs.append(qnet(total_obs).detach())
             rewards = rewards_i[i].view(-1, 1)
             dones = dones_i[i].view(-1, 1)
             qnet_mins = torch.min(qnet_targs[0], qnet_targs[1])
-            # __import__('ipdb').set_trace()
-            # logits_idx = i if self.use_maddpg else 0
-            # logits_agent = next_logits_all[logits_idx]
-            # if len(qnet_mins.squeeze(-1)) != len(logits_agent.squeeze(-1)):
-            #     __import__('ipdb').set_trace()
             target_q = rewards + (1 - dones) * GAMMA * (qnet_mins)
-            # __import__('ipdb').set_trace()
-            # computing the inputs
             losses = []
             for j, qnet in enumerate(self.agents[i].qnets):
                 input_q = qnet(torch.cat([states_all, actions_all], 1))
                 self.agents[i].q_optimizers[j].zero_grad()
-                # print("----")
-                # __import__('ipdb').set_trace() 
                 loss = self.criterion(input_q, target_q.detach())
                 losses.append(loss.item())
-                # print('after')
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(qnet.parameters(), 0.5)
+                # torch.nn.utils.clip_grad_norm_(qnet.parameters(), 0.5)
                 self.agents[i].q_optimizers[j].step()
 
 
@@ -411,24 +409,11 @@ class MADDPG_Trainer:
                 else:
                     actor_loss = - self.agents[i].qnets[0](torch.cat([states_all.detach(),
                                                        gumbel_sample], 1)).mean()
-                # actor_loss += (policy_out**2).mean() * 1e-3
-                # print(f"actor_loss: {actor_loss.item()}")
                 self.agents[i].p_optimizer.zero_grad()
                 actor_loss.backward()
-                # nn.utils.clip_grad_norm_(self.policy.parameters(), 5)
-                # torch.nn.utils.clip_grad_norm_(self.agents[i].policy.parameters(), 0.5)
-
                 torch.nn.utils.clip_grad_norm_(self.agents[i].policy.parameters(), 0.5)
                 self.agents[i].p_optimizer.step()
-                # detach the forward propagated action samples
                 actions_i[i].detach_()
-                # __import__('ipdb').set_trace()
-                # if self.args.use_writer:
-                #     self.writer.add_scalars("Agent_%i" % i, {
-                #         "vf_loss": loss,
-                #         "actor_loss": actor_loss
-                #     }, self.n_updates)
-                # print("Updating all targets") 
                 if self.args.use_writer:
                     self.writer.add_scalar(f"Agent_{i}: policy_objective: ", actor_loss.item(), self.n_updates)
                 self.update_all_targets()
@@ -542,6 +527,7 @@ class MADDPG_Trainer:
         self.n_updates += 1
 
     def sample_and_train(self, batch_size):
+        # return
         # TODO ADD Model saving, optimize code
         batch = self.memory.sample(min(batch_size, len(self.memory)))
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch

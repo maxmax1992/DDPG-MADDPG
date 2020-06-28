@@ -1,6 +1,7 @@
 # edited from stable baselines
 import random
 import torch
+# import numpy as np
 
 class ReplayBuffer(object):
     def __init__(self, size, n_agents, device):
@@ -59,7 +60,14 @@ class ReplayBuffer(object):
             self._storage.append(data)
         else:
             self._storage[self._next_idx] = data
+        # gc.collect()
         self._next_idx = (self._next_idx + 1) % self._maxsize
+
+    def to_tensor(self, nparr, is_number=False):
+        # __import__('ipdb').set_trace()
+        if is_number:
+            return torch.tensor([nparr]).to(self.device).float()
+        return torch.from_numpy(nparr).to(self.device).float()
 
     def _encode_sample(self, idxes):
         obses_t, actions, rewards, obses_tp1, dones = \
@@ -71,13 +79,16 @@ class ReplayBuffer(object):
         for i in idxes:
             data = self._storage[i]
             obs_t, action, reward, obs_tp1, done = data
+            # __import__('ipdb').set_trace()    
             for agent_i in range(self.n_agents):
-                obses_t[agent_i].append(obs_t[agent_i])
-                actions[agent_i].append(action[agent_i])
-                rewards[agent_i].append(reward[agent_i])
-                obses_tp1[agent_i].append(obs_tp1[agent_i])
-                dones[agent_i].append(done[agent_i])
-
+                obses_t[agent_i].append(self.to_tensor(obs_t[agent_i]))
+                actions[agent_i].append(self.to_tensor(action[agent_i]))
+                rewards[agent_i].append(self.to_tensor(reward[agent_i], True))
+                obses_tp1[agent_i].append(self.to_tensor(obs_tp1[agent_i]))
+                # __import__('ipdb').set_trace()
+                dones[agent_i].append(self.to_tensor(done[agent_i], True))
+        
+        # __import__('ipdb').set_trace()
         return [torch.stack(obses_t[i]).to(self.device).float() for i in range(self.n_agents)], \
             [torch.stack(actions[i]).to(self.device).float() for i in range(self.n_agents)], \
             [torch.stack(rewards[i]).to(self.device).float() for i in range(self.n_agents)], \
@@ -91,5 +102,6 @@ class ReplayBuffer(object):
         :return:
             tuple(state_agent1, states_agent2 ... agentN), ...other tuples
         """
+        # print("MEM_SIZE: ", len(self))
         idxes = [random.randint(0, len(self._storage) - 1) for _ in range(batch_size)]
         return self._encode_sample(idxes)

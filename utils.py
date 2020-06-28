@@ -3,8 +3,11 @@ from collections import namedtuple
 import random
 import torch
 from torch.distributions import Categorical
+from torch import Tensor
+from torch.autograd import Variable
 import torch.nn.functional as F
 import copy
+
 
 
 def map_to_tensors(states, actions, rewards, next_obs, dones):
@@ -156,96 +159,98 @@ class ReplayMemory(object):
         return len(self.memory)
 
 class ReplayBuffer(object):
-    def __init__(self, size, nagents):
+    """
+    Replay Buffer for multi-agent RL with parallel rollouts
+    """
+    def __init__(self, max_steps, num_agents, obs_dims, ac_dims):
         """
-        Implements a ring buffer (FIFO).
-        :param size: (int)  Max number of transitions to store in the buffer. When the buffer overflows the old
-            memories are dropped.
+        Inputs:
+            max_steps (int): Maximum number of timepoints to store in buffer
+            num_agents (int): Number of agents in environment
+            obs_dims (list of ints): number of obervation dimensions for each
+                                     agent
+            ac_dims (list of ints): number of action dimensions for each agent
         """
-        self._storage = []
-        self._maxsize = size
-        self._next_idx = 0
-        self.n_agents = nagents
+        self.max_steps = max_steps
+        self.num_agents = num_agents
+        self.obs_buffs = []
+        self.ac_buffs = []
+        self.rew_buffs = []
+        self.next_obs_buffs = []
+        self.done_buffs = []
+        for odim, adim in zip(obs_dims, ac_dims):
+            self.obs_buffs.append(np.zeros((max_steps, odim)))
+            self.ac_buffs.append(np.zeros((max_steps, adim)))
+            self.rew_buffs.append(np.zeros(max_steps))
+            self.next_obs_buffs.append(np.zeros((max_steps, odim)))
+            self.done_buffs.append(np.zeros(max_steps))
+
+
+        self.filled_i = 0  # index of first empty location in buffer (last index when full)
+        self.curr_i = 0  # current index to write to (ovewrite oldest data)
 
     def __len__(self):
-        return len(self._storage)
+        return self.filled_i
 
-    @property
-    def storage(self):
-        """[(Union[np.ndarray, int], Union[np.ndarray, int], float, Union[np.ndarray, int], bool)]: content of the replay buffer"""
-        return self._storage
+    def push(self, observations, actions, rewards, next_observations, dones):
+        # nentries = observations.shape[0]  # handle multiple parallel environments
+        nentries = len(observations)
+        if self.curr_i + nentries > self.max_steps:
+            rollover = self.max_steps - self.curr_i # num of indices to roll over
+            for agent_i in range(self.num_agents):
+                self.obs_buffs[agent_i] = np.roll(self.obs_buffs[agent_i],
+                                                  rollover, axis=0)
+                self.ac_buffs[agent_i] = np.roll(self.ac_buffs[agent_i],
+                                                 rollover, axis=0)
+                self.rew_buffs[agent_i] = np.roll(self.rew_buffs[agent_i],
+                                                  rollover)
+                self.next_obs_buffs[agent_i] = np.roll(
+                    self.next_obs_buffs[agent_i], rollover, axis=0)
+                self.done_buffs[agent_i] = np.roll(self.done_buffs[agent_i],
+                                                   rollover)
+            self.curr_i = 0
+            self.filled_i = self.max_steps
+        for agent_i in range(self.num_agents):
+            self.obs_buffs[agent_i][self.curr_i:self.curr_i + nentries] = np.vstack(
+                observations[agent_i])
+            # actions are already batched by agent, so they are indexed differently
+            self.ac_buffs[agent_i][self.curr_i:self.curr_i + nentries] = actions[agent_i]
+            self.rew_buffs[agent_i][self.curr_i:self.curr_i + nentries] = rewards[:, agent_i]
+            self.next_obs_buffs[agent_i][self.curr_i:self.curr_i + nentries] = np.vstack(
+                next_observations[:, agent_i])
+            self.done_buffs[agent_i][self.curr_i:self.curr_i + nentries] = dones[:, agent_i]
+        self.curr_i += nentries
+        if self.filled_i < self.max_steps:
+            self.filled_i += nentries
+        if self.curr_i == self.max_steps:
+            self.curr_i = 0
 
-    @property
-    def buffer_size(self):
-        """float: Max capacity of the buffer"""
-        return self._maxsize
-
-    def can_sample(self, n_samples):
-        """
-        Check if n_samples samples can be sampled
-        from the buffer.
-        :param n_samples: (int)
-        :return: (bool)
-        """
-        return len(self) >= n_samples
-
-    def is_full(self):
-        """
-        Check whether the replay buffer is full or not.
-        :return: (bool)
-        """
-        return len(self) == self.buffer_size
-
-    def add(self, obs_t, action, reward, obs_tp1, done):
-        """
-        add a new transition to the buffer
-        :param obs_t: (Union[np.ndarray, int]) the last observation
-        :param action: (Union[np.ndarray, int]) the action
-        :param reward: (float) the reward of the transition
-        :param obs_tp1: (Union[np.ndarray, int]) the current observation
-        :param done: (bool) is the episode done
-        """
-        data = (obs_t, action, reward, obs_tp1, done)
-
-        if self._next_idx >= len(self._storage):
-            self._storage.append(data)
+    def sample(self, N, to_gpu=False, norm_rews=True):
+        inds = np.random.choice(np.arange(self.filled_i), size=N,
+                                replace=False)
+        if to_gpu:
+            cast = lambda x: Variable(Tensor(x), requires_grad=False).cuda()
         else:
-            self._storage[self._next_idx] = data
-        self._next_idx = (self._next_idx + 1) % self._maxsize
+            cast = lambda x: Variable(Tensor(x), requires_grad=False)
+        if norm_rews:
+            ret_rews = [cast((self.rew_buffs[i][inds] -
+                              self.rew_buffs[i][:self.filled_i].mean()) /
+                             self.rew_buffs[i][:self.filled_i].std())
+                        for i in range(self.num_agents)]
+        else:
+            ret_rews = [cast(self.rew_buffs[i][inds]) for i in range(self.num_agents)]
+        return ([cast(self.obs_buffs[i][inds]) for i in range(self.num_agents)],
+                [cast(self.ac_buffs[i][inds]) for i in range(self.num_agents)],
+                ret_rews,
+                [cast(self.next_obs_buffs[i][inds]) for i in range(self.num_agents)],
+                [cast(self.done_buffs[i][inds]) for i in range(self.num_agents)])
 
-    def _encode_sample(self, idxes):
-        obses_t, actions, rewards, obses_tp1, dones = [ [] for _ in range(self.n_agents) ], \
-            [], [], [ [] for _ in range(self.n_agents) ], \
-            []
-
-        for i in idxes:
-            data = self._storage[i]
-            obs_t, action, reward, obs_tp1, done = data
-            actions.append(action)
-            rewards.append(reward)
-            # obses_t.append(obs_t)
-            # obses_tp1.append(obses_tp1)
-            for j in range(self.n_agents):
-                obses_t[j].append(obs_t[j])
-                obses_tp1[j].append(obs_tp1[j])
-            dones.append(done)
-        
-        return obses_t, actions, rewards, obses_tp1, dones
-
-    def sample(self, batch_size, **_kwargs):
-        """
-        Sample a batch of experiences.
-        :param batch_size: (int) How many transitions to sample.
-        :return:
-            - obs_batch: (np.ndarray) batch of observations
-            - act_batch: (numpy float) batch of actions executed given obs_batch
-            - rew_batch: (numpy float) rewards received as results of executing act_batch
-            - next_obs_batch: (np.ndarray) next set of observations seen after executing act_batch
-            - done_mask: (numpy bool) done_mask[i] = 1 if executing act_batch[i] resulted in the end of an episode
-                and 0 otherwise.
-        """
-        idxes = [random.randint(0, len(self._storage) - 1) for _ in range(batch_size)]
-        return self._encode_sample(idxes)
+    def get_average_rewards(self, N):
+        if self.filled_i == self.max_steps:
+            inds = np.arange(self.curr_i - N, self.curr_i)  # allow for negative indexing
+        else:
+            inds = np.arange(max(0, self.curr_i - N), self.curr_i)
+        return [self.rew_buffs[i][inds].mean() for i in range(self.num_agents)]
 
 
 # source: https://stable-baselines.readthedocs.io/en/master/_modules/stable_baselines/common/schedules.html#ConstantSchedule
