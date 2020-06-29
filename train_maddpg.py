@@ -44,6 +44,7 @@ def learn_episodic_MADDPG(args):
     ###
     args.env = "simple_speaker_listener"
     # args.discrete_action = True
+    print(args.env)
     env = make_multiagent_env(args.env)
     print(args.exp_name)
     print(args.sac_alpha)
@@ -66,6 +67,7 @@ def learn_episodic_MADDPG(args):
     timesteps = 0
     episode_rewards = [0.0]
     # memreporter = MemReporter()
+    # trainer.eval()
     for ep in range(args.n_eps):
         observations = env.reset()
         trainer.reset()
@@ -112,11 +114,11 @@ def learn_episodic_MADDPG(args):
         # print(running_reward)
         if args.use_writer:
             writer.add_scalar('ep_reward', running_reward, ep)
-        # running_rewards.append(running_reward)
-        # episode_rewards.append(0)
+        running_rewards.append(running_reward)
+        episode_rewards.append(0)
         if (ep + 1) % args.lograte == 0:
             # memreporter.report()
-            print(len(trainer.memory))
+            # print(len(trainer.memory))
             gc.collect()
             print(f"episode: {ep}, running episode rewards: {np.mean(running_rewards)}")
         # TODO ADD logging to the
@@ -147,11 +149,11 @@ def learn_episodic_MADDPG(args):
 if __name__ == '__main__':
     N_EPS = 10000
     args = get_args()
-    rewards_DDPG = learn_episodic_MADDPG(args)
-    # for i in range(10):
-    #     rewards_DDPG = learn_episodic_MADDPG(args)
-    #     rewards_numpy = np.asarray(rewards_DDPG)
-    #     np.savetxt("ep_rewards/DDPG"+str(i) + ".csv", rewards_numpy, delimiter=',')
+    # rewards_DDPG = learn_episodic_MADDPG(args)
+    for i in range(10):
+        rewards_DDPG = learn_episodic_MADDPG(args)
+        rewards_numpy = np.asarray(rewards_DDPG)
+        np.savetxt("ep_rewards/DDPG_all_obs"+str(i) + ".csv", rewards_numpy, delimiter=',')
 
     # plt.plot(moving_average(rewards_DDPG, 100), label="DDPG")
     # plt.legend()
