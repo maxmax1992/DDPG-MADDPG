@@ -9,7 +9,7 @@ class MLPNetwork(nn.Module):
     """
     def __init__(self, input_dim, out_dim, hidden_dim=64, nonlin=F.relu, 
                  constrain_out=False, sac_policy=False, norm_in=True, 
-                 discrete_action=True):
+                 discrete_action=True, td3_policy=False):
         """
         Inputs:
             input_dim (int): Number of dimensions in input
@@ -18,6 +18,7 @@ class MLPNetwork(nn.Module):
             nonlin (PyTorch function): Nonlinearity to apply to hidden layers
         """
         super(MLPNetwork, self).__init__()
+        self.td3_policy = td3_policy
         if norm_in:  # normalize inputs
             self.in_fn = nn.BatchNorm1d(input_dim)
             self.in_fn.weight.data.fill_(1)
@@ -34,7 +35,7 @@ class MLPNetwork(nn.Module):
         if constrain_out and not discrete_action:
             # initialize small to prevent saturation
             self.fc3.weight.data.uniform_(-3e-3, 3e-3)
-            self.out_fn = F.tanh
+            self.out_fn = torch.tanh
         else:  # logits for discrete action (will softmax later)
             
             self.out_fn = lambda x: x
@@ -55,6 +56,10 @@ class MLPNetwork(nn.Module):
                                  torch.ones_like(var_outputs)).detach()
             var_outputs *= noise
             out = out + var_outputs
+
+        if self.td3_policy:
+            return out*2.0
+
         return out
 
 

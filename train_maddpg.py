@@ -1,13 +1,14 @@
 # import sys
 # sys.path.append('.')
+import gc
 import time
 import numpy as np
 import argparse
+import torch
 from collections import deque
 from MADDPG_trainer import MADDPG_Trainer
 from torch.utils.tensorboard import SummaryWriter
 from utils import make_multiagent_env, map_to_tensors
-
 
 def get_args():
     parser = argparse.ArgumentParser(description=None)
@@ -17,7 +18,7 @@ def get_args():
     parser.add_argument("--render_freq", default=0, type=int, help="Render frequency, if=0 no rendering")
     parser.add_argument("--use_writer", action="store_true", help="Use writer or no")
     parser.add_argument("--use_ounoise", action="store_true", help="Use OUNoise")
-    parser.add_argument("--lograte", default=100, type=int, help="Log frequency")
+    parser.add_argument("--lograte", default=500, type=int, help="Log frequency")
     parser.add_argument("--train_freq", default=100, type=int, help="Training frequency")
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--batch_size", default=1024, type=int, help="Batch size for training")
@@ -42,6 +43,7 @@ def learn_episodic_MADDPG(args):
     ###
     args.env = "simple_speaker_listener"
     # args.discrete_action = True
+    print(args.env)
     env = make_multiagent_env(args.env)
     print(args.exp_name)
     print(args.sac_alpha)
@@ -71,6 +73,7 @@ def learn_episodic_MADDPG(args):
             timesteps += 1
             # preprocess observations
             observations = prepro_observations(observations, args.all_obs)
+            
             # get actions
             actions = trainer.get_actions(observations)
             actions = [a.cpu().numpy() for a in actions]
@@ -79,7 +82,7 @@ def learn_episodic_MADDPG(args):
             # __import__('ipdb').set_trace()
             # rewards = [rew**2 for rew in rewards]
             next_obs_ = prepro_observations(next_obs, args.all_obs)
-            trainer.store_transitions(*map_to_tensors(observations, actions, rewards, next_obs_, dones))
+            trainer.store_transitions(observations, actions, rewards, next_obs, dones)
             done = all(dones) or t >= args.T
             if timesteps % args.train_freq == 0:
                 trainer.prep_training()
@@ -88,6 +91,9 @@ def learn_episodic_MADDPG(args):
                     trainer.sample_and_train_sac(args.batch_size)
                 elif not args.use_td3:
                     trainer.sample_and_train(args.batch_size)
+                # elif args.use_td3:
+                #     trainer.train_td3(args.batch_size)
+                # gc.collect()
                 trainer.eval()
             observations = next_obs
             if args.use_td3 and ep > 1:
@@ -106,22 +112,23 @@ def learn_episodic_MADDPG(args):
         running_rewards.append(running_reward)
         episode_rewards.append(0)
         if (ep + 1) % args.lograte == 0:
+            gc.collect()
             print(f"episode: {ep}, running episode rewards: {np.mean(running_rewards)}")
         # TODO ADD logging to the
     # if args.use_writer: trainer.plot_actions()
-    # eval_eps = 200
+    # eval_eps = 1000
     # for i in range(eval_eps):
     #     observations = env.reset()
     #     trainer.reset()
     #     done = False
-    #     for t in range(50):
+    #     for t in range(40):
     #         timesteps += 1
     #         actions = trainer.get_actions(observations)
     #         actions = [a.cpu().numpy() for a in actions]
     #         next_obs, rewards, dones, _ = env.step(actions)
     #         done = all(dones) or t >= args.T
     #         observations = next_obs
-    #         time.sleep(0.2)
+    #         time.sleep(0.07)
     #         env.render()
     #         if done:
     #             break
@@ -129,24 +136,18 @@ def learn_episodic_MADDPG(args):
     #     writer.export_scalars_to_json(str(log_dir / 'summary.json'))
     #     writer.close()
         
-    return 0
+    return episode_rewards 
 
 
 if __name__ == '__main__':
     N_EPS = 10000
     args = get_args()
-    # rewards_DQN_dueling = learn_episodic_DQN(N_EPS, 500, use_dueling=True)
-    alphas = [0.8, 0.6, 0.4, 0.2, 0.15, 0.1, 0.05, 0.01, 0.001]
-    exp_name_base = "sac_alpha"
-    # for alpha in alphas:
-    #     # alpha = 0.6
-    #     print("starting with alpha" + str(alpha))
-    #     args.exp_name = exp_name_base + str(alpha)
-    #     alpha = 0.6
-    #     args.sac_alpha = alpha
-    #     # args.sac_alpha = alpha
-            
-    rewards_DDPG = learn_episodic_MADDPG(args)
+    # rewards_DDPG = learn_episodic_MADDPG(args)
+    for i in range(10):
+        rewards_DDPG = learn_episodic_MADDPG(args)
+        rewards_numpy = np.asarray(rewards_DDPG)
+        np.savetxt("ep_rewards/TD3-longer_version"+str(i) + ".csv", rewards_numpy, delimiter=',')
+
     # plt.plot(moving_average(rewards_DDPG, 100), label="DDPG")
     # plt.legend()
     # plt.show()
