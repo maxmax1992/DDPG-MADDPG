@@ -311,14 +311,9 @@ class MADDPG_Trainer:
         for agent in self.agents:
             agent.set_eval()
 
-    def sample_and_train_td3(self, batch_size):
-        t = self.n_steps
-        # print(self.n_steps) 
-        update_every = self.agents[0].update_every
-        update_after = self.agents[0].update_after
-        if (t + 1) > update_after and (t + 1) % update_every == 0:
-            for i in range(update_every):
-                 self.train_td3(batch_size, i)
+    def sample_and_train_td3(self, batch_size, update_every):
+        for i in range(update_every):
+             self.train_td3(batch_size, i)
 
     def batch_add_random_acts(self, tensor, prob, ag_i):
         index_arr = np.arange(len(tensor))
