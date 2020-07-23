@@ -66,7 +66,7 @@ def learn_episodic_MADDPG(args):
     timesteps = 0
     episode_rewards = [0.0]
     for ep in range(args.n_eps):
-        print("EP" + str(ep))
+        # print("EP" + str(ep))
         observations = env.reset()
         trainer.reset()
         done = False
@@ -139,11 +139,11 @@ def learn_episodic_MADDPG(args):
 if __name__ == '__main__':
     N_EPS = 10000
     args = get_args()
-    #rds_DDPG = learn_episodic_MADDPG(args)
-    print(args)
-    for i in range(10):
-        rewards_DDPG = learn_episodic_MADDPG(args)
-        rewards_numpy = np.asarray(rewards_DDPG)
-        np.savetxt("ep_rewards/TD3-longer_discrete"+str(i) + ".csv", rewards_numpy, delimiter=',')
+    rds_DDPG = learn_episodic_MADDPG(args)
+    # print(args)
+    # for i in range(10):
+    #     rewards_DDPG = learn_episodic_MADDPG(args)
+    #     rewards_numpy = np.asarray(rewards_DDPG)
+    #     np.savetxt("ep_rewards/TD3-longer_discrete"+str(i) + ".csv", rewards_numpy, delimiter=',')
     # plt.legend()
     # plt.show()

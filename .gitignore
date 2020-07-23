@@ -12,3 +12,4 @@ maddpg
 maddpg-pytorch
 baselines
 *logs/
+*.csv
