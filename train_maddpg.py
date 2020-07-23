@@ -56,6 +56,8 @@ def learn_episodic_MADDPG(args):
     observation_spaces = [ob_sp.shape[0] for ob_sp in env.observation_space]
     if args.all_obs:
         observation_spaces = [sum(observation_spaces) for i in range(n_agents)]
+
+    print("obs spcs", observation_spaces)
     # __import__('ipdb').set_trace()
     log_dir = "./logs/" + args.exp_name
     writer = SummaryWriter(log_dir) if args.use_writer else None
@@ -67,7 +69,7 @@ def learn_episodic_MADDPG(args):
     timesteps = 0
     episode_rewards = [0.0]
     # memreporter = MemReporter()
-    # trainer.eval()
+    trainer.eval()
     for ep in range(args.n_eps):
         observations = env.reset()
         trainer.reset()
@@ -75,8 +77,7 @@ def learn_episodic_MADDPG(args):
         for t in range(args.T):
             timesteps += 1
             # preprocess observations
-            # observations = prepro_observations(observations, args.all_obs)
-            
+            observations = prepro_observations(observations, args.all_obs)
             # get actions
             actions = trainer.get_actions(observations)
             actions = [a.cpu().numpy() for a in actions]
@@ -85,7 +86,7 @@ def learn_episodic_MADDPG(args):
             # __import__('ipdb').set_trace()
             # rewards = [rew**2 for rew in rewards]
             # with torch.no_grad():
-            # next_obs_ = prepro_observations(next_obs, args.all_obs)
+            next_obs = prepro_observations(next_obs, args.all_obs)
             trainer.store_transitions(observations, actions, rewards, next_obs, dones)
             done = all(dones) or t >= args.T
             if timesteps % args.train_freq == 0:
