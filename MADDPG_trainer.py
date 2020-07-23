@@ -324,7 +324,7 @@ class MADDPG_Trainer:
 
 
     def train_td3(self, batch_size, timer):
-
+        print("TRAINING")
         batch = self.memory.sample(min(batch_size, len(self.memory)))
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
         # __import__('ipdb').set_trace()

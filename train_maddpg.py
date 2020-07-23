@@ -66,7 +66,7 @@ def learn_episodic_MADDPG(args):
     timesteps = 0
     episode_rewards = [0.0]
     for ep in range(args.n_eps):
-        # print(ep)
+        print("EP" + str(ep))
         observations = env.reset()
         trainer.reset()
         done = False
