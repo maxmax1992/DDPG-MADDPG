@@ -295,21 +295,31 @@ def make_multiagent_env(scenario_name, benchmark=False):
         .action_space       :   Returns the action space for each agent
         .n                  :   Returns the number of Agents
     '''
-    from multiagent.environment import MultiAgentEnv
-    import multiagent.scenarios as scenarios
+    # Import PettingZoo environments instead of multiagent library
+    from pettingzoo.butterfly import knights_archers_zombies_v10
+    from pettingzoo.classic import rps_v2
+    from pettingzoo.mpe import simple_speaker_listener_v4, simple_spread_v3, simple_v3
+    from pettingzoo_wrapper import PettingZooEnvWrapper
 
-    # load scenario from script
-    scenario = scenarios.load(scenario_name + ".py").Scenario()
-    # create world
-    world = scenario.make_world()
-    # create multiagent environment
-    if benchmark:
-        env = MultiAgentEnv(world, scenario.reset_world,
-                            scenario.reward, scenario.observation, scenario.
-                            benchmark_data)
-    else:
-        env = MultiAgentEnv(world, scenario.reset_world,
-                            scenario.reward, scenario.observation)
-    return env
+    # Map scenario names to PettingZoo environments
+    env_mapping = {
+        "simple": simple_v3.env,
+        "simple_speaker_listener": simple_speaker_listener_v4.env,
+        "simple_spread": simple_spread_v3.env,
+        "knights_archers_zombies": knights_archers_zombies_v10.env,
+        "rps": rps_v2.env
+    }
+    
+    if scenario_name not in env_mapping:
+        raise ValueError(f"Unsupported scenario: {scenario_name}. Available scenarios: {list(env_mapping.keys())}")
+    
+    # Initialize the environment
+    env_fn = env_mapping[scenario_name]
+    env = env_fn()
+    
+    # Wrap the environment to make it compatible with MADDPG
+    wrapped_env = PettingZooEnvWrapper(env)
+    
+    return wrapped_env
 
     # env = make_env('simple_speaker_listener')

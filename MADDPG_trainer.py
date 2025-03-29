@@ -91,11 +91,10 @@ class TD3_agent:
             # action = self.policy_targ(st)
         else:
             # __import__('ipdb').set_trace()
-            
+            
             # print("not target")
             action = self.policy(st)
             noise = (self.act_noise**0.5)*torch.randn(action.shape)
-            # __import__('ipdb').set_trace()
             action += noise
         action_with_noise = gumbel_softmax(action, hard=True).detach()
         # __import__('ipdb').set_trace()
@@ -212,7 +211,7 @@ class DDPG_agent:
         if is_target:
             action = self.policy_targ(st)
         else:
-            __import__('ipdb').set_trace()
+            # __import__('ipdb').set_trace()
             action = self.policy(st)
         action_with_noise = gumbel_softmax(action, hard=True).detach()
         return action_with_noise
@@ -527,7 +526,6 @@ class MADDPG_Trainer:
         self.n_updates += 1
 
     def sample_and_train(self, batch_size):
-        return
         # TODO ADD Model saving, optimize code
         batch = self.memory.sample(min(batch_size, len(self.memory)))
         states_i, actions_i, rewards_i, next_states_i, dones_i = batch
